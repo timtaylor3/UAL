@@ -1,7 +1,3 @@
-maxmind/GeoLite2-ASN-old.mmdb
-maxmind/GeoLite2-ASN.mmdb
-maxmind/GeoLite2-City-old.mmdb
 maxmind/GeoLite2-City.mmdb
-maxmind/GeoLite2-Country.mmdb
 code_test.ipynb
 workspace.code-workspace
