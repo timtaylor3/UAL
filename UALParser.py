@@ -1,3 +1,4 @@
+from re import I
 import coloredlogs
 import datetime
 import errno
@@ -149,17 +150,14 @@ class PrepClass:
 
 
 class UALClass:
-    def __init__(self, source_path, out_path, script_path, plog):
+    def __init__(self, source_path, out_path, maxminddb, plog):
         self.source_path = source_path
         self.ese_dbs = self.get_ese_files(self.source_path)
         self.out_path = out_path
-        self.maxmind_db = os.path.join(script_path, r'maxmind\GeoLite2-City.mmdb')
+        self.maxmind_db = maxminddb
         self.plog = plog
-        self.column_dict = {0:'NULL', 1:'Text', 2:'Integer', 3:'Integer', 4:'Integer', 5:'Integer', 6:'Real', 7:'Real', 8:'Text',
-                         9:'Blob', 10:'Text', 11:'Blob', 12:'Text', 13:'Integer', 14:'Integer', 15:'Integer', 16:'Text', 17:'Integer'}
         self.GUID = list()
         self.chained_databases = dict()
-        self.role_ids = dict()
         self.system_identity = list()
         self.series_list = list()
         self.chain_db_df = pd.DataFrame() 
@@ -169,6 +167,30 @@ class UALClass:
         self.dns_df = pd.DataFrame()
         self.role_access_df = pd.DataFrame()
         self.virtualmachine_df = pd.DataFrame()
+
+        # This will be overwritten if the SystemIdentity file is processed.
+        self.role_ids = {
+            '{C50FCC83-BC8D-4DF5-8A3D-89D7F80F074B}': 'Active Directory Certificate Services', 
+            '{AD495FC3-0EAA-413D-BA7D-8B13FA7EC598}': 'Active Directory Domain Services',
+            '{B4CDD739-089C-417E-878D-855F90081BE7}': 'Active Directory Rights Management Service', 
+            '{910CBAF9-B612-4782-A21F-F7C75105434A}': 'BranchCache', 
+            '{48EED6B2-9CDC-4358-B5A5-8DEA3B2F3F6A}': 'DHCP Server', 
+            '{7CC4B071-292C-4732-97A1-CF9A7301195D}': 'FAX Server', 
+            '{10A9226F-50EE-49D8-A393-9A501D47CE04}': 'File Server', 
+            '{C23F1C6A-30A8-41B6-BBF7-F266563DFCD6}': 'FTP Server',
+            '{DDE30B98-449E-4B93-84A6-EA86AF0B19FE}': 'MSMQ', 
+            '{BBD85B29-9DCC-4FD9-865D-3846DCBA75C7}': 'Network Policy and Access Services', 
+            '{7FB09BD3-7FE6-435E-8348-7D8AEFB6CEA3}': 'Print and Document Services', 
+            '{952285D9-EDB7-4B6B-9D85-0C09E3DA0BBD}': 'Remote Access', 
+            '{8CC0AC85-40F7-4886-9DAB-021519800418}': 'Reporting Services',
+            '{2414BC1B-1572-4CD9-9CA5-65166D8DEF3D}': 'SQL Server Analysis Services',
+            '{BD7F7C0D-7C36-4721-AFA8-0BA700E26D9E}': 'SQL Server Database Engine',
+            '{D6256CF7-98FB-4EB4-AA18-303F1DA1F770}': 'Web Server', 
+            '{4116A14D-3840-4F42-A67F-F2F9FF46EB4C}': 'Windows Deployment Services', 
+            '{D8DC1C8E-EA13-49CE-9A68-C9DCA8DB8B33}': 'Windows Server Update Services',
+            '{1479A8C1-9808-411E-9739-2D3C5923E86A}': 'Windows Server 2016 DatacenterRemote Desktop Gateway',  
+            '{90E64AFA-70DB-4FEF-878B-7EB8C868F091}': 'Windows ServerRemote Desktop Services', 
+            }
 
 
     def get_ese_files(self,source_path):
@@ -195,7 +217,7 @@ class UALClass:
         
         for current_mdb in self.ese_dbs:
             if not (current_mdb.endswith('SystemIdentity.mdb')):
-
+                self.plog.log('info', 'Processing DB File: {} '.format(current_mdb))
                 table = ''
                 table_list = list()
                 file_object = open(current_mdb, "rb")
@@ -234,54 +256,86 @@ class UALClass:
         if table_info['num_records'] > 0:
             self.plog.log('info', 'Processing {} records in the DNS table'.format(table_info['num_records']))
             table = esedb_file.get_table(table_info['number'])
+            c = 0
             for t in range(0, table_info['num_records']):
+                c+=1
                 r = table.get_record(t)
                 dns = dict()
+                ip_address = self.get_raw_data(r, r.get_column_type(1), 1).decode('utf-16').rstrip('\x00')
                 dns[r.get_column_name(0)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(0), 0))
-                dns[r.get_column_name(1)] = self.get_raw_data(r, r.get_column_type(1), 1).decode('utf-8')
+                dns[r.get_column_name(1)] = str(ip_address) 
                 dns[r.get_column_name(2)] = self.get_raw_data(r, r.get_column_type(2), 2).decode('utf-16').rstrip('\x00')
-                dns['Source_File'] = current_mdb
+                
+                ipversion = ipaddress.ip_address(ip_address).version
+                if ipversion == 4:
+                    ip_address = ipaddress.IPv4Address(ip_address)
+                else:
+                    ip_address = ipaddress.IPv6Address(ip_address)
+
+                if ip_address.is_private:
+                    dns['Country'] = 'Private'
+
+                else: 
+                    dns['Country'] = self.maxminddb_lookup(ip_address)  
+
+                if ip_address.version == 6:
+                    link_local = ip_address.is_link_local
+                    if link_local:
+                        dns['Country'] = ', '.join([dns['Country'], 'Link Local'])
+
+                dns['Source_File'] = os.path.basename(current_mdb)
                 self.dns_df = self.dns_df.append(dns, ignore_index=True)  
+                if c % 250 == 0:
+                    self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
+            self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
 
         else:
             self.plog.log('info', 'There were no records in the DNS table')
 
 
     def process_clients_table(self, current_mdb, esedb_file, table_info):
+    
         if table_info['num_records'] > 0:
             self.plog.log('info', 'Processing {} records in the Client table'.format(table_info['num_records']))
             table = esedb_file.get_table(table_info['number'])
+            c=0
             for t in range(0, table_info['num_records']):
+                c+=1
                 r = table.get_record(t)
                 client = dict()
     
-                client[r.get_column_name(0)] = self.get_raw_data(r, r.get_column_type(0), 0)
+                role_guid = self.get_raw_data(r, r.get_column_type(0), 0)
+                client[r.get_column_name(0)] = role_guid
+                client['RoleName'] = self.role_ids.get(role_guid, 'Not Found')
                 client[r.get_column_name(1)] = self.get_raw_data(r, r.get_column_type(1), 1)
                 client[r.get_column_name(2)] = self.get_raw_data(r, r.get_column_type(2), 2)
                 client[r.get_column_name(3)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(3), 3)) 
                 client[r.get_column_name(4)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(4), 4))
             
                 ip_address = self.hex_to_ip(self.get_raw_data(r, r.get_column_type(5), 5))
-                client[r.get_column_name(5)] = ip_address 
-
-                if os.path.isfile(self.maxmind_db): 
-                    if ip_address.is_private:
-                        client['Country'] = 'Private IP Address'
-                    else: 
-                        if os.path.isfile(self.maxmind_db): 
-                            client['Country'] = self.maxminddb_lookup(ip_address)
-                else:
-                    self.plog.log('info', 'Maxmind DB not found')
-
+                client[r.get_column_name(5)] = str(ip_address) 
                 
+                if ip_address.is_private:
+                    client['Country'] = 'Private'
+                else: 
+                    client['Country'] = self.maxminddb_lookup(ip_address)  
+
+                if ip_address.version == 6:
+                    link_local = ip_address.is_link_local
+                    if link_local:
+                        client['Country'] = ', '.join([client['Country'], 'Link Local'])
+
                 client[r.get_column_name(6)] = self.get_raw_data(r, r.get_column_type(6), 6).decode('utf-16').rstrip('\x00')
                 client[r.get_column_name(7)] = self.get_raw_data(r, r.get_column_type(7), 7)
                 for c_num in range (8, table_info['num_columns']):
                     client[r.get_column_name(c_num)] = self.get_raw_data(r, r.get_column_type(c_num), c_num)
-                client['Source_File'] = current_mdb
+                client['Source_File'] = os.path.basename(current_mdb)
                 
                 self.client_df = self.client_df.append(client, ignore_index=True)  
 
+                if c % 250 == 0:
+                    self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
+            self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
         else:
             self.plog.log('info', 'There were no records in the Client table')
 
@@ -296,7 +350,7 @@ class UALClass:
                 ra[r.get_column_name(0)] = self.get_raw_data(r, r.get_column_type(0), 0)
                 ra[r.get_column_name(1)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(1), 1))
                 ra[r.get_column_name(2)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(2), 2))
-                ra['Source_File'] = current_mdb
+                ra['Source_File'] = os.path.basename(current_mdb)
                 self.role_access_df = self.role_access_df.append(ra, ignore_index=True)  
         else:
             self.plog.log('info', 'There were no records in the ROLE_ACCESS table')   
@@ -314,7 +368,7 @@ class UALClass:
                 vm[r.get_column_name(2)] = self.get_raw_data(r, r.get_column_type(2), 2)
                 vm[r.get_column_name(3)] = self.get_raw_data(r, r.get_column_type(3), 3)
                 vm[r.get_column_name(4)] = self.get_raw_data(r, r.get_column_type(4), 4)
-                vm['Source_File'] = current_mdb
+                vm['Source_File'] = os.path.basename(current_mdb)
                 
             self.virtualmachine_df = self.virtualmachine_df.append(vm, ignore_index=True)  
         else:
@@ -322,7 +376,7 @@ class UALClass:
 
 
     def process_system_identity(self):
-        # Needs to return a dict for self.GUID_Dict, self.chained_databases
+        # Needs to return a dict for  self.chained_databases
         g_dict = dict()
     
         system_identity_file = os.path.join(self.source_path, 'SystemIdentity.mdb')
@@ -362,18 +416,23 @@ class UALClass:
                             self.GUID.append(GUID_dict)
                         self.role_ids_df = self.role_ids_df.append( self.GUID, ignore_index=True)         
 
+                        # re-setting the dictionary since we have a better data from this table
+                        self.role_ids = dict()
+                        for index, row in self.role_ids_df.iterrows():
+                            self.role_ids[row['RoleGUID']] = row['RoleName']
+
 
                     elif item['name'] == 'CHAINED_DATABASES':
                         table = esedb_file.get_table(item['number'])
                         self.plog.log('info', 'Processing {} records in the CHAINED_DATABASES table'.format(item['num_records']))
                         for t in range(0, item['num_records']):
                                 record = table.get_record(t)
-                                raw_key = str(record.get_value_data_as_integer(0))
-                                raw_value = record.get_value_data(1).decode('utf-16', 'ignore').rstrip('\x00')
-                                self.chained_databases[raw_key] = raw_value
+                                year = str(record.get_value_data_as_integer(0))
+                                file_name = record.get_value_data(1).decode('utf-16', 'ignore').rstrip('\x00')
+                                self.chained_databases[file_name] = year
 
                         self.chain_db_df = self.chain_db_df.append(self.chained_databases, ignore_index=True) 
-
+                
 
                     elif item['name'] == 'SYSTEM_IDENTITY':
                         
@@ -428,6 +487,7 @@ class UALClass:
 
 
     def get_table_data(self):
+
        # record = pd.Series(series_list, index=header) 
        # df = df.append(record, ignore_index=True) 
 
@@ -507,24 +567,22 @@ class UALClass:
 
         return ip_address
   
-
+    
     def maxminddb_lookup(self, ip_address):
-        self.plog.log('debug', 'Lookup  {} '.format(ip_address))
+        self.plog.log('debug', 'Lookup {} '.format(str(ip_address)))
         result = ''
-
-        if ip_address.is_private:
-            result = 'Private'
-
-        else:    
-            with maxminddb.open_database(self.maxmind_db) as reader:
-                geo_dict = reader.get(ip_address)                    
-                if geo_dict:
-                    if 'country' in geo_dict:
-                        result = geo_dict['country']['iso_code']
-                        
-                        if not result:                     
-                            result = geo_dict['country']['names']['en']
-
+        
+        with maxminddb.open_database(self.maxmind_db) as reader:
+            geo_dict = reader.get(str(ip_address)) 
+            self.plog.log('debug', 'Geo Record for IP {} was {}:'.format(str(ip_address), geo_dict))
+            if geo_dict:
+                result = geo_dict['country'].get('iso_code', 'Country Not Found')                
+                if result == 'Country Not Found':                     
+                    result = geo_dict['registered_country'].get('iso_code', 'Registered Country Not Found') 
+            else:
+                result = 'No Maxmind record found for {}'.format(str(ip_address))
+                
+        self.plog.log('debug', '{}'.format(result))
         return result
 
 
@@ -781,7 +839,7 @@ class UALClass:
             body_format.set_num_format('@')
 
             # Clients Db
-            left_most_columns = ['RoleGuid', 'AuthenticatedUserName','Address', 'Country', 'TotalAccesses', 'InsertDate','LastAccess','ClientName']
+            left_most_columns = ['RoleName','RoleGuid', 'AuthenticatedUserName','Address', 'Country', 'TotalAccesses', 'InsertDate','LastAccess','TenantId','ClientName']
             right_most_colums = sorted(list([a for a in self.client_df.columns if a not in left_most_columns]))
             client_header = left_most_columns + right_most_colums
             self.client_df = self.client_df.reindex(columns=(left_most_columns + right_most_colums))
@@ -791,21 +849,22 @@ class UALClass:
 
             worksheet = writer.sheets['Clients']
             worksheet.write_row(0, 0, client_header, header_format)
-            worksheet.set_column('A:B', 50, body_format)
-            worksheet.set_column('A:B', 50, body_format)
-            worksheet.set_column('C:C', 23, body_format)
-            worksheet.set_column('D:D', 20, body_format)
-            worksheet.set_column('E:F', 25, body_format)
-            worksheet.set_column('G:G', 16, body_format)
-            worksheet.set_column('H:NJ', 15, body_format)
-            worksheet.set_column('NK:NK', 150, body_format)
-            worksheet.set_column('NL:NL', 40, body_format)
+            worksheet.set_column('A:A', 35, body_format)
+            worksheet.set_column('B:B', 50, body_format)
+            worksheet.set_column('C:D', 30, body_format)
+            worksheet.set_column('E:E', 25, body_format)
+            worksheet.set_column('F:F', 15, body_format)
+            worksheet.set_column('G:H', 25, body_format)
+            worksheet.set_column('I:I', 40, body_format)
+            worksheet.set_column('J:J', 15, body_format)
+            worksheet.set_column('K:NL', 10, body_format)
+            worksheet.set_column('NM:NM', 50, body_format)
 
             worksheet.autofilter(0, 0, max_rows, max_columns-1)
             worksheet.freeze_panes(1, 0)
 
             #DNS
-            dns_header = ['LastSeen', 'Address','HostName','Source_File']
+            dns_header = ['LastSeen','Address','HostName','Country','Source_File']
             self.dns_df = self.dns_df.reindex(columns=(dns_header))
             max_rows, max_columns = self.dns_df.shape
             self.dns_df.to_excel(writer, sheet_name='DNS', startrow=1, header=False, index=False)
@@ -814,7 +873,8 @@ class UALClass:
             worksheet.set_column('A:A', 25, body_format)
             worksheet.set_column('B:B', 25, body_format) 
             worksheet.set_column('C:C', 25, body_format)
-            worksheet.set_column('D:D', 150, body_format)
+            worksheet.set_column('D:D', 25, body_format)
+            worksheet.set_column('E:E', 50, body_format)
             worksheet.write_row(0, 0, dns_header, header_format)
             worksheet.autofilter(0, 0, max_rows, max_columns-1)
             worksheet.freeze_panes(1, 0)
@@ -829,7 +889,7 @@ class UALClass:
             worksheet.set_column('A:A', 40, body_format)
             worksheet.set_column('B:B', 25, body_format)
             worksheet.set_column('C:C', 25, body_format)
-            worksheet.set_column('D:D', 150, body_format)
+            worksheet.set_column('D:D', 50, body_format)
             worksheet.write_row(0, 0, role_access_header, header_format)
             worksheet.autofilter(0, 0, max_rows, max_columns-1)
             worksheet.freeze_panes(1, 0)
@@ -867,7 +927,17 @@ def main():
 
     script_start = time.time()
     script_path = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0])))
+
     config_file_path = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), 'settings.cfg'))
+    if not os.path.isfile(config_file_path):
+        print('Configuration file {} does not exist!'.format(config_file_path))
+        sys.exit(-1)
+
+    config = ConfigParser(allow_no_value=True)
+    config.read([config_file_path])
+        
+    config.maxmind_config = dict(config.items("MAXMINDDB"))
+    maxminddb = os.path.join(script_path, config.maxmind_config['maxminddb'])
 
     if not args.raw_input_path or not args.raw_output_path:
         parser.print_help()
@@ -878,7 +948,7 @@ def main():
         p_log = prep.setup_logging(args.debug)
         prep.setup_output_directory()
 
-        parser = UALClass(args.raw_input_path, args.raw_output_path, script_path, p_log)
+        parser = UALClass(args.raw_input_path, args.raw_output_path, maxminddb, p_log)
         parser.process_system_identity()
         parser.ual_db_check()
         parser.process_chained_databases()
