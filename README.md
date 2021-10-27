@@ -37,3 +37,7 @@ When the script is ready for general use, the user will have the option to selec
 * libesedb (pyesedb) (compile from source:  https://github.com/libyal/libesedb)  (pip install libesedb-python failed for 3.8 and 3.9, YMMVH)
 * GeoLite2-City.mmdb (https://www.maxmind.com) Place in a subdirectory named <i>script_location</i>\maxmind\GeoLite2-City.mmdb
 
+References: 
+* https://github.com/brimorlabs/KStrike
+* https://ericzimmerman.github.io/#!index.md
+* https://advisory.kpmg.us/blog/2021/digital-forensics-incident-response.html
