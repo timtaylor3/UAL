@@ -712,211 +712,292 @@ class UALClass:
                 return record.get_value_data_as_integer(c_num)
 
 
-    def write_system_identity_csv(self):
-        self.plog.log('info', 'Writing System Identity to CSV')
+    def write_system_identity(self, ftype):
+        
+        self.plog.log('info', 'Writing System Identity to xlsx')
+        xlsx_file = os.path.join(self.out_path, 'System_Identity.xlsx')
+
         chained_db_csv_file = os.path.join(self.out_path, 'CHAINED_DATABASES.csv')
         roles_ids_csv_file = os.path.join(self.out_path, 'ROLE_IDS.csv')
         system_identity_csv_file = os.path.join(self.out_path, 'SYSTEM_IDENTITY.csv')
 
-        max_rows, max_columns = self.chain_db_df.shape
-        if max_rows > 0:
-            self.chain_db_df.to_csv(chained_db_csv_file, header=True, index=False, na_rep='')
-            
-        max_rows, max_columns = self.role_ids_df.shape
-        if max_rows > 0:
-            self.role_ids_df.to_csv(roles_ids_csv_file, header=True, index=False, na_rep='')
-
-        max_rows, max_columns = self.system_identity_df.shape
-        if max_rows > 0:
-            self.system_identity_df.to_csv(system_identity_csv_file, header=True, index=False, na_rep='')
-
-
-    def write_system_identity_xlsx(self):
-        self.plog.log('info', 'Writing System Identity to xlsx')
-        xlsx_file = os.path.join(self.out_path, 'System_Identity.xlsx')
-
-        with pd.ExcelWriter(xlsx_file, date_format='YYYY-MM-DD HH:MM:SS') as writer:
-            # chain_db_df
-            max_rows, max_columns = self.chain_db_df.shape
-            self.chain_db_df.to_excel(writer, sheet_name='ChainDB', startrow=0, header=True, index=False)
-            chain_db_header = ['Year', 'FileName']
-            workbook  = writer.book
-
-            header_format = workbook.add_format({
-                'bold': True,
-                'text_wrap': True,
-                'valign': 'top',
-                'fg_color': '#0070C0',
-                'border': 1})
-                    
-            body_format = workbook.add_format({
-                'text_wrap': True,
-                'align': 'left',
-                'valign': 'top'
-                })
-
-            worksheet = writer.sheets['ChainDB']
-            worksheet.set_column('A:C', 50, body_format)
-            worksheet.autofilter(0, 0, max_rows, max_columns-1)
-            worksheet.freeze_panes(1, 0)
-
-            # ROLE_IDS
-            max_rows, max_columns = self.role_ids_df.shape
-            self.role_ids_df.to_excel(writer, sheet_name='Role IDs', startrow=0, header=True, index=False)
-            RoleID_header = ['Role_GUID', 'ProductName', 'RoleName']
-            worksheet = writer.sheets['Role IDs']
-            worksheet.set_column('A:C', 50, body_format)
-            worksheet.write_row(0, 0, RoleID_header, header_format)
-            worksheet.autofilter(0, 0, max_rows, max_columns-1)
-            worksheet.freeze_panes(1, 0)
-
-            # SYSTEM_IDENTITY
-            max_rows, max_columns = self.system_identity_df.shape
-            self.system_identity_df.to_excel(writer, sheet_name='SYSTEM_IDENTITY', startrow=0, header=True, index=False)
-            system_identity_header = ['CreationTime', 'PhysicalProcessorCount', 'CoresPerPhysicalProcessor', 'LogicalProcessorsPerPhysicalProcessor', 'MaximumMemory', 
-                'OSMajor', 'OSMinor', 'OSBuildNumber', 'OSPlatformId', 'ServicePackMajor', 'ServicePackMinor', 'OSSuiteMask', 'OSProductType', 
-                'OSCurrentTimeZone', 'OSDaylightInEffect', 'SystemManufacturer', 'SystemProductName', 'SystemSMBIOSUUID', 'SystemSerialNumber', 
-                'SystemDNSHostName', 'SystemDomainName', 'OSSerialNumber', 'OSCountryCode', 'OSLastBootUpTime']
-            worksheet = writer.sheets['SYSTEM_IDENTITY']
-            worksheet.set_column('A:C', 25, body_format)
-            worksheet.set_column('D:D', 40, body_format)
-            worksheet.set_column('E:E', 20, body_format)
-            worksheet.set_column('F:F', 11, body_format)
-            worksheet.set_column('G:G', 11, body_format)
-            worksheet.set_column('H:H', 20, body_format)
-            worksheet.set_column('I:I', 15, body_format)
-            worksheet.set_column('J:J', 20, body_format)
-            worksheet.set_column('K:K', 20, body_format)
-            worksheet.set_column('L:L', 15, body_format)
-            worksheet.set_column('M:M', 20, body_format)
-            worksheet.set_column('N:N', 21, body_format)
-            worksheet.set_column('O:O', 20, body_format)
-            worksheet.set_column('P:P', 22, body_format)
-            worksheet.set_column('Q:Q', 30, body_format)
-            worksheet.set_column('R:R', 40, body_format)
-            worksheet.set_column('S:S', 35, body_format)
-            worksheet.set_column('T:T', 25, body_format)
-            worksheet.set_column('U:U', 25, body_format)
-            worksheet.set_column('V:V', 25, body_format)
-            worksheet.set_column('W:W', 17, body_format)
-            worksheet.set_column('X:X', 26, body_format)
-            worksheet.write_row(0, 0, system_identity_header, header_format)
-            worksheet.autofilter(0, 0, max_rows, max_columns-1)
-            worksheet.freeze_panes(1, 0)
-
-
-    def write_chain_db_csv(self):
-        self.plog.log('info', 'Writing Chain databases to csv')
-        clients_csv_file = os.path.join(self.out_path, 'clients.csv')
-        dns_csv_file = os.path.join(self.out_path, 'dns.csv')
-        roles_ids_csv_file = os.path.join(self.out_path, 'ROLE_IDS.csv')
-        system_identity_csv_file = os.path.join(self.out_path, 'SYSTEM_IDENTITY.csv')
-
-        max_rows, max_columns = self.client_df.shape
-        if max_rows > 0:
-            self.client_df.to_csv(clients_csv_file, header=True, index=False, na_rep='')
+        chain_db_header = ['Year', 'FileName']
+        RoleID_header = ['Role_GUID', 'ProductName', 'RoleName']
+        system_identity_header = ['CreationTime', 'PhysicalProcessorCount', 'CoresPerPhysicalProcessor', 'LogicalProcessorsPerPhysicalProcessor', 'MaximumMemory', 
+                    'OSMajor', 'OSMinor', 'OSBuildNumber', 'OSPlatformId', 'ServicePackMajor', 'ServicePackMinor', 'OSSuiteMask', 'OSProductType', 
+                    'OSCurrentTimeZone', 'OSDaylightInEffect', 'SystemManufacturer', 'SystemProductName', 'SystemSMBIOSUUID', 'SystemSerialNumber', 
+                    'SystemDNSHostName', 'SystemDomainName', 'OSSerialNumber', 'OSCountryCode', 'OSLastBootUpTime']
         
-        max_rows, max_columns = self.dns_df.shape
-        if max_rows > 0:
-            self.dns_df.to_csv(dns_csv_file, header=True, index=False, na_rep='')
+        chain_db_max_rows, chain_db_max_columns = self.chain_db_df.shape
+        role_ids_max_rows, role_ids_max_columns = self.role_ids_df.shape
+        system_identity_max_rows, system_identity_max_columns = self.system_identity_df.shape
+
+        if ftype.lower() == 'csv':
+           
+            if chain_db_max_rows > 0:
+                self.chain_db_df.to_csv(chained_db_csv_file, header=True, index=False, na_rep='')
+                
+            if role_ids_max_rows > 0:
+                self.role_ids_df.to_csv(roles_ids_csv_file, header=True, index=False, na_rep='')
+
+            if system_identity_max_rows > 0:
+                self.system_identity_df.to_csv(system_identity_csv_file, header=True, index=False, na_rep='')
+
+        elif ftype.lower() == 'json':
+            
+            if chain_db_max_rows > 0:
+                json_file = chained_db_csv_file.replace('csv','json')
+                self.chain_db_df.to_json(json_file, orient='records', date_format='iso', lines=True,index=True)
+
+            if role_ids_max_rows > 0:
+                json_file = roles_ids_csv_file.replace('csv','json')
+                self.role_ids_df.to_json(json_file, orient='records', date_format='iso', lines=True,index=True)
+            
+            if system_identity_max_rows > 0:
+                json_file = system_identity_csv_file.replace('csv','json')
+                self.system_identity_df.to_json(json_file, orient='records', date_format='iso', lines=True,index=True)
+
+        else:
+
+            with pd.ExcelWriter(xlsx_file, date_format='YYYY-MM-DD HH:MM:SS') as writer:
+                # chain_db
+ 
+                self.chain_db_df.to_excel(writer, sheet_name='ChainDB', startrow=0, header=True, index=False)
+                
+                workbook  = writer.book
+
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'text_wrap': True,
+                    'valign': 'top',
+                    'fg_color': '#0070C0',
+                    'border': 1})
+                        
+                body_format = workbook.add_format({
+                    'text_wrap': True,
+                    'align': 'left',
+                    'valign': 'top'
+                    })
+
+                worksheet = writer.sheets['ChainDB']
+                worksheet.set_column('A:C', 50, body_format)
+                worksheet.autofilter(0, 0, chain_db_max_rows, chain_db_max_columns-1)
+                worksheet.freeze_panes(1, 0)
+
+                # ROLE_IDS
+                
+                self.role_ids_df.to_excel(writer, sheet_name='Role IDs', startrow=0, header=True, index=False)
+                
+                worksheet = writer.sheets['Role IDs']
+                worksheet.set_column('A:C', 50, body_format)
+                worksheet.write_row(0, 0, RoleID_header, header_format)
+                worksheet.autofilter(0, 0, role_ids_max_rows, role_ids_max_columns-1)
+                worksheet.freeze_panes(1, 0)
+
+                # SYSTEM_IDENTITY
+
+                self.system_identity_df.to_excel(writer, sheet_name='SYSTEM_IDENTITY', startrow=0, header=True, index=False)
+                
+                worksheet = writer.sheets['SYSTEM_IDENTITY']
+                worksheet.set_column('A:C', 25, body_format)
+                worksheet.set_column('D:D', 40, body_format)
+                worksheet.set_column('E:E', 20, body_format)
+                worksheet.set_column('F:F', 11, body_format)
+                worksheet.set_column('G:G', 11, body_format)
+                worksheet.set_column('H:H', 20, body_format)
+                worksheet.set_column('I:I', 15, body_format)
+                worksheet.set_column('J:J', 20, body_format)
+                worksheet.set_column('K:K', 20, body_format)
+                worksheet.set_column('L:L', 15, body_format)
+                worksheet.set_column('M:M', 20, body_format)
+                worksheet.set_column('N:N', 21, body_format)
+                worksheet.set_column('O:O', 20, body_format)
+                worksheet.set_column('P:P', 22, body_format)
+                worksheet.set_column('Q:Q', 30, body_format)
+                worksheet.set_column('R:R', 40, body_format)
+                worksheet.set_column('S:S', 35, body_format)
+                worksheet.set_column('T:T', 25, body_format)
+                worksheet.set_column('U:U', 25, body_format)
+                worksheet.set_column('V:V', 25, body_format)
+                worksheet.set_column('W:W', 17, body_format)
+                worksheet.set_column('X:X', 26, body_format)
+                worksheet.write_row(0, 0, system_identity_header, header_format)
+                worksheet.autofilter(0, 0, system_identity_max_rows, system_identity_max_columns-1)
+                worksheet.freeze_panes(1, 0)
 
 
-    def write_chain_db_xlsx(self):
+    def write_chain_db(self, ftype):
         self.plog.log('info', 'Writing Chain databases to xlsx')
         xlsx_file = os.path.join(self.out_path, 'Chain_DBs.xlsx')
+        csv_file = os.path.join(self.out_path, 'CLIENTS.csv')
+        dns_csv_file = os.path.join(self.out_path, 'DNS.csv')
+        role_access_csv_file = os.path.join(self.out_path, 'ROLE_ACCESS.csv')
+        vm_csv_file = os.path.join(self.out_path, 'VirtualMachines.csv')
 
-        with pd.ExcelWriter(xlsx_file, date_format='YYYY-MM-DD HH:MM:SS') as writer:
+        # Format DF's
+        client_header = self.format_chain_df()
+        dns_header = self.format_dns_df()
+        role_access_header = self.format_role_access_df()
+        vm_header = self.format_vm_df()
 
-            workbook = writer.book
-            header_format = workbook.add_format({
-                'bold': True,
-                'text_wrap': True,
-                'valign': 'top',
-                'fg_color': '#0070C0',
-                'border': 1})
+        client_max_rows, client_max_columns = self.client_df.shape
+        dns_max_rows, dns_max_columns = self.dns_df.shape
+        ra_max_rows, ra_max_columns = self.role_access_df.shape
+        vm_max_rows, vm_max_columns = self.virtualmachine_df.shape
+
+        if ftype.lower() == 'csv': 
+            
+            if client_max_rows > 0:
+                self.client_df.to_csv(csv_file, header=True, index=False, na_rep='')
+
+            if dns_max_rows > 0:
+                self.dns_df.to_csv(dns_csv_file, header=True, index=False, na_rep='')
+            
+            if ra_max_rows > 0:
+                self.role_access_df.to_csv(role_access_csv_file, header=True, index=False, na_rep='')
+
+            if vm_max_rows > 0:
+                self.virtualmachine_df.to_csv(vm_csv_file, header=True, index=False, na_rep='')
+
+        elif ftype.lower() == 'json':
+
+            if client_max_rows > 0:
+                json_file = csv_file.replace('csv','json')
+                self.client_df.to_json(json_file, orient='records', date_format='iso', lines=True,index=True)
+
+            if dns_max_rows > 0:
+                json_file = dns_csv_file.replace('csv','json')
+                self.dns_df.to_json(json_file, orient='records', date_format='iso', lines=True,index=True)
+            
+            if ra_max_rows > 0:
+                json_file = role_access_csv_file.replace('csv','json')
+                self.role_access_df.to_json(json_file, orient='records', date_format='iso', lines=True,index=True)
+
+            if vm_max_rows > 0:
+                json_file = vm_csv_file.replace('csv','json')
+                self.virtualmachine_df.to_json(json_file, orient='records', date_format='iso', lines=True,index=True)
+           
+        else:
+
+            with pd.ExcelWriter(xlsx_file, date_format='YYYY-MM-DD HH:MM:SS') as writer:
+                workbook = writer.book
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'text_wrap': True,
+                    'valign': 'top',
+                    'fg_color': '#0070C0',
+                    'border': 1})
+
+                body_format = workbook.add_format({'text_wrap': True,'align': 'left','valign': 'top'})
+                body_format.set_num_format('@')
+        
+                # Clients Db
+
+                if client_max_rows > 0:
+
+                    self.client_df.to_excel(writer, sheet_name='Clients', startrow=1, header=False, index=False)
+                    worksheet = writer.sheets['Clients']
+                    worksheet.write_row(0, 0, client_header, header_format)
+                    worksheet.set_column('A:A', 35, body_format)
+                    worksheet.set_column('B:B', 50, body_format)
+                    worksheet.set_column('C:D', 30, body_format)
+                    worksheet.set_column('E:E', 25, body_format)
+                    worksheet.set_column('F:F', 15, body_format)
+                    worksheet.set_column('G:H', 25, body_format)
+                    worksheet.set_column('I:I', 40, body_format)
+                    worksheet.set_column('J:J', 15, body_format)
+                    worksheet.set_column('K:NL', 10, body_format)
+                    worksheet.set_column('NM:NM', 50, body_format)
+
+                    worksheet.autofilter(0, 0, client_max_rows, client_max_columns-1)
+                    worksheet.freeze_panes(1, 0)
+
+                #DNS
+                
+                if dns_max_rows > 0:
+
+                    self.dns_df.to_excel(writer, sheet_name='DNS', startrow=1, header=False, index=False)
+                    worksheet = writer.sheets['DNS']
+                    worksheet.write_row(0, 0, dns_header, header_format)
+                    worksheet.set_column('A:A', 25, body_format)
+                    worksheet.set_column('B:B', 25, body_format) 
+                    worksheet.set_column('C:C', 25, body_format)
+                    worksheet.set_column('D:D', 25, body_format)
+                    worksheet.set_column('E:E', 50, body_format)
+                    worksheet.write_row(0, 0, dns_header, header_format)
+                    worksheet.autofilter(0, 0, dns_max_rows, dns_max_columns-1)
+                    worksheet.freeze_panes(1, 0)
+
+                # ROLE_ACCESS
+                
+                if ra_max_rows > 0:
                     
-            body_format = workbook.add_format({'text_wrap': True,'align': 'left','valign': 'top'})
-            body_format.set_num_format('@')
+                    self.role_access_df.to_excel(writer, sheet_name='ROLE_ACCESS', startrow=1, header=False, index=False)
+                    worksheet = writer.sheets['ROLE_ACCESS']
+                    worksheet.write_row(0, 0, role_access_header, header_format)
+                    worksheet.set_column('A:A', 40, body_format)
+                    worksheet.set_column('B:B', 25, body_format)
+                    worksheet.set_column('C:C', 25, body_format)
+                    worksheet.set_column('D:D', 50, body_format)
+                    worksheet.write_row(0, 0, role_access_header, header_format)
+                    worksheet.autofilter(0, 0, ra_max_rows, ra_max_columns-1)
+                    worksheet.freeze_panes(1, 0)
 
-            # Clients Db
+                # VirtualMachines
+
+                if vm_max_rows > 0:
+                    
+                    self.virtualmachine_df.to_excel(writer, sheet_name='VirtualMachines', startrow=1, header=False, index=False)
+                    worksheet = writer.sheets['VirtualMachines']
+                    worksheet.write_row(0, 0, dns_header, header_format)
+                    worksheet.set_column('A:A', 40, body_format)
+                    worksheet.set_column('B:B', 20, body_format)
+                    worksheet.set_column('C:C', 20, body_format)
+                    worksheet.set_column('D:D', 20, body_format)
+                    worksheet.set_column('E:E', 20, body_format)
+                    worksheet.set_column('F:F', 150, body_format)
+
+                    worksheet.write_row(0, 0, vm_header, header_format)
+                    worksheet.autofilter(0, 0, vm_max_rows, vm_max_columns-1)
+                    worksheet.freeze_panes(1, 0)
+
+
+
+    def format_chain_df(self):
+        max_rows, max_columns = self.client_df.shape
+        if max_rows > 0:
             left_most_columns = ['RoleName','RoleGuid', 'AuthenticatedUserName','Address', 'Country', 'TotalAccesses', 'InsertDate','LastAccess','TenantId','ClientName']
             right_most_colums = sorted(list([a for a in self.client_df.columns if a not in left_most_columns]))
             client_header = left_most_columns + right_most_colums
             self.client_df = self.client_df.reindex(columns=(left_most_columns + right_most_colums))
 
-            max_rows, max_columns = self.client_df.shape
-            self.client_df.to_excel(writer, sheet_name='Clients', startrow=1, header=False, index=False)
+        return client_header
 
-            worksheet = writer.sheets['Clients']
-            worksheet.write_row(0, 0, client_header, header_format)
-            worksheet.set_column('A:A', 35, body_format)
-            worksheet.set_column('B:B', 50, body_format)
-            worksheet.set_column('C:D', 30, body_format)
-            worksheet.set_column('E:E', 25, body_format)
-            worksheet.set_column('F:F', 15, body_format)
-            worksheet.set_column('G:H', 25, body_format)
-            worksheet.set_column('I:I', 40, body_format)
-            worksheet.set_column('J:J', 15, body_format)
-            worksheet.set_column('K:NL', 10, body_format)
-            worksheet.set_column('NM:NM', 50, body_format)
 
-            worksheet.autofilter(0, 0, max_rows, max_columns-1)
-            worksheet.freeze_panes(1, 0)
+    def format_dns_df(self):
+        dns_header = ['LastSeen','Address','HostName','Country','Source_File']
+        self.dns_df = self.dns_df.reindex(columns=(dns_header))
+        return dns_header
 
-            #DNS
-            dns_header = ['LastSeen','Address','HostName','Country','Source_File']
-            self.dns_df = self.dns_df.reindex(columns=(dns_header))
-            max_rows, max_columns = self.dns_df.shape
-            self.dns_df.to_excel(writer, sheet_name='DNS', startrow=1, header=False, index=False)
-            worksheet = writer.sheets['DNS']
-            worksheet.write_row(0, 0, dns_header, header_format)
-            worksheet.set_column('A:A', 25, body_format)
-            worksheet.set_column('B:B', 25, body_format) 
-            worksheet.set_column('C:C', 25, body_format)
-            worksheet.set_column('D:D', 25, body_format)
-            worksheet.set_column('E:E', 50, body_format)
-            worksheet.write_row(0, 0, dns_header, header_format)
-            worksheet.autofilter(0, 0, max_rows, max_columns-1)
-            worksheet.freeze_panes(1, 0)
 
-            # ROLE_ACCESS
-            role_access_header = ['RoleGuid','FirstSeen','LastSeen','Source_File']
-            self.role_access_df = self.role_access_df.reindex(columns=(role_access_header))
-            max_rows, max_columns = self.role_access_df.shape
-            self.role_access_df.to_excel(writer, sheet_name='ROLE_ACCESS', startrow=1, header=False, index=False)
-            worksheet = writer.sheets['ROLE_ACCESS']
-            worksheet.write_row(0, 0, dns_header, header_format)
-            worksheet.set_column('A:A', 40, body_format)
-            worksheet.set_column('B:B', 25, body_format)
-            worksheet.set_column('C:C', 25, body_format)
-            worksheet.set_column('D:D', 50, body_format)
-            worksheet.write_row(0, 0, role_access_header, header_format)
-            worksheet.autofilter(0, 0, max_rows, max_columns-1)
-            worksheet.freeze_panes(1, 0)
+    def format_role_access_df(self):
+        role_access_header = ['RoleGuid','FirstSeen','LastSeen','Source_File']
+        self.role_access_df = self.role_access_df.reindex(columns=(role_access_header))
+        return role_access_header
 
-            # VirtualMachines
-            vm_header = ['VmGuid','BIOSGuid','CreationTime','LastSeenActive','SerialNumber','Source_File']
-            self.virtualmachine_df = self.virtualmachine_df.reindex(columns=(vm_header))
-            max_rows, max_columns = self.virtualmachine_df.shape
-            self.virtualmachine_df.to_excel(writer, sheet_name='VirtualMachines', startrow=1, header=False, index=False)
-            worksheet = writer.sheets['VirtualMachines']
-            worksheet.write_row(0, 0, dns_header, header_format)
-            worksheet.set_column('A:A', 40, body_format)
-            worksheet.set_column('B:B', 20, body_format)
-            worksheet.set_column('C:C', 20, body_format)
-            worksheet.set_column('D:D', 20, body_format)
-            worksheet.set_column('E:E', 20, body_format)
-            worksheet.set_column('F:F', 150, body_format)
 
-            worksheet.write_row(0, 0, vm_header, header_format)
-            worksheet.autofilter(0, 0, max_rows, max_columns-1)
-            worksheet.freeze_panes(1, 0)
+    def format_vm_df(self):
+        vm_header = ['VmGuid','BIOSGuid','CreationTime','LastSeenActive','SerialNumber','Source_File']
+        self.virtualmachine_df = self.virtualmachine_df.reindex(columns=(vm_header))
+        return vm_header 
+
 
 
 def main():
     parser = ArgumentParser(prog='UAL Processing', description='Parsing and Processing of the UAL ese databases.', usage='%(prog)s [options]', epilog='Version: {}'.format(__version__))
     parser.add_argument('-d', help='Path to directory contianing the database "\Windows\System32\LogFiles\SUM\" (Required)', action='store', dest='raw_input_path')
-    parser.add_argument('-o', help='Path to write the output files (Required)', action='store', dest='raw_output_path')                 
+    parser.add_argument('-o', help='Path to write the output files (Required)', action='store', dest='raw_output_path') 
+    parser.add_argument('-t', help='Output Type,Supported CSV, json and XLSX (Optional, default xlsx)', action='store', dest='ftype')                  
     parser.add_argument('--debug', help='Debug mode (More output to logs for troubleshooting)', action="store_true")
     parser.add_argument('-v', help='Show Version and exit.', action="store_true")
     args = parser.parse_args()
@@ -948,14 +1029,19 @@ def main():
         p_log = prep.setup_logging(args.debug)
         prep.setup_output_directory()
 
+        ftype = ''
+        if not args.ftype:
+            ftype = 'xlsx'
+        else:
+            ftype = args.ftype
+        
+
         parser = UALClass(args.raw_input_path, args.raw_output_path, maxminddb, p_log)
         parser.process_system_identity()
         parser.ual_db_check()
         parser.process_chained_databases()
-        # parser.write_system_identity_csv()
-        parser.write_system_identity_xlsx()
-        # parser.write_chain_db_csv()
-        parser.write_chain_db_xlsx()
+        parser.write_system_identity(ftype)
+        parser.write_chain_db(ftype)
 
         end_time = time.time()
         total_minutes = ((end_time - script_start)/60)
