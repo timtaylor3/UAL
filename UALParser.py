@@ -1,4 +1,3 @@
-from re import I
 import coloredlogs
 import datetime
 import errno
@@ -6,26 +5,27 @@ import ipaddress
 import logging
 import maxminddb
 import os
+from numpy import source
 import pandas as pd
 import getpass
-from pandas.core.frame import DataFrame
 import pyesedb as esedb
+import sqlite3
 import sys
+import traceback
 import uuid
 import binascii
 import struct
 import time
 from argparse import ArgumentParser
 from configparser import ConfigParser
-from datetime import timedelta
-from datetime import datetime
+from datetime import datetime, timedelta
 from binascii import unhexlify
+from pandas.core.frame import DataFrame
 from pandas.io.parsers import ParserError
-from sqlalchemy.types import NVARCHAR, Float, Integer
 from struct import unpack
 
 __author__ = 'Tim Taylor'
-__version__ = '20211027-01'
+__version__ = '20211106'
 __credit__ = 'Inspired by BriMor Labs/KStrike'
 
 """
@@ -88,16 +88,16 @@ class LogClass:
         """
         current_user = getpass.getuser()
 
-        log_format = '%(asctime)s:%(levelname)s:%(message)s'
-        date_fmt = '%m/%d/%Y %I:%M:%S'
-        logging.basicConfig(filename=logname, format=log_format, level=debug_level, filemode='a', datefmt=date_fmt)
-        console = logging.StreamHandler()
-        console.setLevel(debug_level)
+        # log_format = '%(asctime)s:%(levelname)s:%(message)s'
+        #date_fmt = '%m/%d/%Y %I:%M:%S'
+        # logging.basicConfig(filename=logname, format=log_format, level=debug_level, filemode='a', datefmt=date_fmt)
+        # console = logging.StreamHandler()
+        # console.setLevel(debug_level)
 
-        formatter = logging.Formatter(log_format)
+        #formatter = logging.Formatter(log_format)
         
-        console.setFormatter(formatter)
-        logging.getLogger('').addHandler(console)
+        # console.setFormatter(formatter)
+        #logging.getLogger('').addHandler(console)
 
         clr_log_format = '%(asctime)s:%(hostname)s:%(programname)s:%(username)s[%(process)d]:%(levelname)s:%(message)s'
         coloredlogs.install(level=debug_level, fmt=clr_log_format)
@@ -127,6 +127,7 @@ class PrepClass:
         self.p_log = ''
         self.config = ''
 
+    
     def setup_logging(self, debug_mode=False):  
         log_level = 'info'
         if debug_mode: 
@@ -140,6 +141,7 @@ class PrepClass:
         return self.p_log
 
 
+
     def setup_output_directory(self):
         if not os.path.exists(self.raw_output_path):
             try:
@@ -150,12 +152,16 @@ class PrepClass:
 
 
 class UALClass:
-    def __init__(self, source_path, out_path, maxminddb, plog):
-        self.source_path = source_path
+    def __init__(self, config_dict):
+
+        self.config_dict = config_dict
+        self.source_path =  config_dict['raw_input_path']
         self.ese_dbs = self.get_ese_files(self.source_path)
-        self.out_path = out_path
-        self.maxmind_db = maxminddb
-        self.plog = plog
+        self.out_path =  config_dict['raw_output_path']
+        self.maxmind_db = config_dict['maxminddb']
+        self.ftype = config_dict['ftype']
+        self.plog = config_dict['p_log']
+        self.sql_db = os.path.join(self.out_path, 'UAL.db')
         self.GUID = list()
         self.chained_databases = dict()
         self.system_identity = list()
@@ -167,6 +173,7 @@ class UALClass:
         self.dns_df = pd.DataFrame()
         self.role_access_df = pd.DataFrame()
         self.virtualmachine_df = pd.DataFrame()
+        self.timeline_df = pd.DataFrame()
 
         # This will be overwritten if the SystemIdentity file is processed.
         self.role_ids = {
@@ -192,6 +199,14 @@ class UALClass:
             '{90E64AFA-70DB-4FEF-878B-7EB8C868F091}': 'Windows ServerRemote Desktop Services', 
             }
 
+        self.main()
+
+    def main(self):
+        self.process_system_identity()
+        self.process_chained_databases()
+        self.write_system_identity()
+        self.write_chain_db()
+
 
     def get_ese_files(self,source_path):
        ese_dbs = list()
@@ -203,16 +218,6 @@ class UALClass:
        return ese_dbs
 
 
-    def ual_db_check(self):
-        for file in self.ese_dbs:
-            if os.path.basename(file) in list(self.chained_databases.values()):
-                self.plog.log('info', 'Found {} in SystemIdentity.mdb'.format(os.path.basename(file)))
-
-            else:
-                if not (file.endswith('Current.mdb') or file.endswith('SystemIdentity.mdb')):
-                    self.plog.log('warn', '{} Was not found in SystemIdentity.mdb'.format(file))
-
-
     def process_chained_databases(self):
         
         for current_mdb in self.ese_dbs:
@@ -220,9 +225,22 @@ class UALClass:
                 self.plog.log('info', 'Processing DB File: {} '.format(current_mdb))
                 table = ''
                 table_list = list()
-                file_object = open(current_mdb, "rb")
-                esedb_file = esedb.file() 
-                esedb_file.open_file_object(file_object)
+                
+                try:
+                    file_object = open(current_mdb, "rb")
+                    esedb_file = esedb.file() 
+                    esedb_file.open_file_object(file_object)
+
+                except OSError as error:
+                    self.plog.log('Critical', 'Invalid ESE database: {}'.format(error))
+                    self.plog.log('Critical', 'Exception class is: {}'.format(error.__class__))
+                    self.plog.log('Critical', 'Exception is: {}'.format(error.args))
+                    exc_type, exc_value, exc_tb = sys.exc_info()
+                    self.plog.log('Critical', traceback.format_exception(exc_type, exc_value, exc_tb)) 
+                    self.plog.log('Critical', '{} was not parsed'.format(current_mdb))
+                    pass
+
+
                 number_of_tables = esedb_file.get_number_of_tables() 
 
                 for i in range(0, number_of_tables):
@@ -234,11 +252,13 @@ class UALClass:
                     table_dict['num_records'] = table.get_number_of_records()
                     table_list.append(table_dict)
 
+                # Need to ensure DNS is processed first.
                 for item in table_list:
                     if item['name'] ==  'DNS':
                         self.plog.log('info', 'Processing {} '.format(item['name']))
-                        self.process_dns_table(current_mdb, esedb_file, item)
+                        dns_dict = self.process_dns_table(current_mdb, esedb_file, item)
 
+                for item in table_list:
                     if item['name'] ==  'CLIENTS':
                         self.plog.log('info', 'Processing {} '.format(item['name']))
                         self.process_clients_table(current_mdb, esedb_file, item)
@@ -325,11 +345,70 @@ class UALClass:
                     if link_local:
                         client['Country'] = ', '.join([client['Country'], 'Link Local'])
 
+                # Add dns_dict data here
+                if self.dns_df.empty:
+                    client['DNSLookup'] = 'No DNS Data Found'
+                
+                else:
+                    
+                    ip = str(ip_address)    
+                    source_file = os.path.basename(current_mdb)  
+
+                    host_name_row_df = self.dns_df.query('Address == @ip and Source_File == @source_file')
+                    
+                    if host_name_row_df.empty:
+                        client['DNSLookup'] = 'Not found'
+
+                    else:
+                        max_row, max_col = host_name_row_df.shape
+                        if max_row > 1:
+                            dns_lookup_dict = host_name_row_df.to_dict(orient='records')
+                            t = list()
+                            for item in dns_lookup_dict:
+                                hn = item['HostName']
+                                ls = item['LastSeen']
+                                t.append(''.join([item['HostName'], ' : ', item['LastSeen'], ' ']))
+                            
+                            client['DNSLookup'] = ','.join(t)
+
+                        else:
+                            hn = host_name_row_df['HostName'].values
+                            ls = host_name_row_df['LastSeen'].values
+
+                            client['DNSLookup'] = ' : '.join([hn[0], ls[0]])
+
                 client[r.get_column_name(6)] = self.get_raw_data(r, r.get_column_type(6), 6).decode('utf-16').rstrip('\x00')
                 client[r.get_column_name(7)] = self.get_raw_data(r, r.get_column_type(7), 7)
+                
+                # Noted in research there is a guid.mdb for the current year.
+                # Since I don't know how the guids are derived each new year, I'm not hard coding the guid to year mapping
+                # Best Effort to get the correct year is attempted
+
+                current_year = ''
+                if source_file == 'Current.mdb':
+                    current_year = client['LastAccess'][:4]
+                
+                else:
+                    current_year = self.get_year(source_file)
+                    if not current_year:
+                        current_year = client['LastAccess'][:4]
+
+                access_dates = list()
                 for c_num in range (8, table_info['num_columns']):
+                    c_name =r.get_column_name(c_num)
+                    c_value = self.get_raw_data(r, r.get_column_type(c_num), c_num)
+
+                    if c_value > 0:
+                        c_name = c_name.replace('Day','')
+
+                        converted_j_date = self.convert_julian_date(''.join([current_year[-2:], str(c_name)]))
+                        access_dates.append('{}: {}'.format(converted_j_date, c_value))
+                        
                     client[r.get_column_name(c_num)] = self.get_raw_data(r, r.get_column_type(c_num), c_num)
-                client['Source_File'] = os.path.basename(current_mdb)
+                    # ''.join(access_dates).strip(', ')  
+                    client['OtherAccessCount'] = ', '.join(access_dates).strip(', ')  
+
+                client['Source_File'] = source_file
                 
                 self.client_df = self.client_df.append(client, ignore_index=True)  
 
@@ -376,8 +455,6 @@ class UALClass:
 
 
     def process_system_identity(self):
-        # Needs to return a dict for  self.chained_databases
-        g_dict = dict()
     
         system_identity_file = os.path.join(self.source_path, 'SystemIdentity.mdb')
         if os.path.isfile(system_identity_file):
@@ -387,9 +464,20 @@ class UALClass:
             if system_identity_file:
                 table = ''
                 table_list = list()
-                file_object = open(system_identity_file, "rb")
-                esedb_file = esedb.file() 
-                esedb_file.open_file_object(file_object)
+                try:
+                    file_object = open(system_identity_file, "rb")
+                    esedb_file = esedb.file() 
+                    esedb_file.open_file_object(file_object)
+
+                except OSError as error:
+                    self.plog.log('Critical', 'Invalid ESE database: {}'.format(error))
+                    self.plog.log('Critical', 'Exception class is: {}'.format(error.__class__))
+                    self.plog.log('Critical', 'Exception is: {}'.format(error.args))
+                    exc_type, exc_value, exc_tb = sys.exc_info()
+                    self.plog.log('Critical', traceback.format_exception(exc_type, exc_value, exc_tb)) 
+                    self.plog.log('Critical', '{} was not parsed'.format(system_identity_file))
+                    pass
+
                 number_of_tables = esedb_file.get_number_of_tables() 
 
                 for i in range(0, number_of_tables):
@@ -425,15 +513,14 @@ class UALClass:
                     elif item['name'] == 'CHAINED_DATABASES':
                         table = esedb_file.get_table(item['number'])
                         self.plog.log('info', 'Processing {} records in the CHAINED_DATABASES table'.format(item['num_records']))
+                        chained_databases = dict()
                         for t in range(0, item['num_records']):
-                                record = table.get_record(t)
-                                year = str(record.get_value_data_as_integer(0))
-                                file_name = record.get_value_data(1).decode('utf-16', 'ignore').rstrip('\x00')
-                                self.chained_databases[file_name] = year
+                            record = table.get_record(t)
+                            chained_databases['Year'] = str(record.get_value_data_as_integer(0))
+                            chained_databases['FileName'] = record.get_value_data(1).decode('utf-16', 'ignore').rstrip('\x00')
 
-                        self.chain_db_df = self.chain_db_df.append(self.chained_databases, ignore_index=True) 
+                            self.chain_db_df = self.chain_db_df.append(chained_databases, ignore_index=True) 
                 
-
                     elif item['name'] == 'SYSTEM_IDENTITY':
                         
                         table = esedb_file.get_table(item['number'])
@@ -567,7 +654,15 @@ class UALClass:
 
         return ip_address
   
-    
+
+    def get_year(self, source_file):
+        return self.chain_db_df.query('FileName == @source_file')['Year'].values[0]
+
+
+    def convert_julian_date(self, j_date):
+        return datetime.strptime(j_date, '%y%j').date().strftime('%Y-%m-%d')
+       
+
     def maxminddb_lookup(self, ip_address):
         self.plog.log('debug', 'Lookup {} '.format(str(ip_address)))
         result = ''
@@ -587,16 +682,6 @@ class UALClass:
 
 
     def get_raw_data(self, record, c_type, c_num):
-        """
-        Inspired by KStrike, but I was looking for something more flexible for future projects.
-        Need to handle data conversion separtely based on table and column name in most cases.
-        For example, c_type == 9 will be a macaddress for UAL but wouldn't be in another ESE db.
-
-       Probably should decode utf-8 or utf-16 here because bothe can be used.
-       .decode('utf-8', 'ignore').replace('\x00', '')
-       .decode('utf-16', 'ignore').replace('\x00', '')
-
-        """
         if c_type == 0:    # Null
             return 'None'
 
@@ -712,7 +797,7 @@ class UALClass:
                 return record.get_value_data_as_integer(c_num)
 
 
-    def write_system_identity(self, ftype):
+    def write_system_identity(self):
         
         self.plog.log('info', 'Writing System Identity to xlsx')
         xlsx_file = os.path.join(self.out_path, 'System_Identity.xlsx')
@@ -721,7 +806,7 @@ class UALClass:
         roles_ids_csv_file = os.path.join(self.out_path, 'ROLE_IDS.csv')
         system_identity_csv_file = os.path.join(self.out_path, 'SYSTEM_IDENTITY.csv')
 
-        chain_db_header = ['Year', 'FileName']
+        chain_db_header = ['FileName', 'Year']
         RoleID_header = ['Role_GUID', 'ProductName', 'RoleName']
         system_identity_header = ['CreationTime', 'PhysicalProcessorCount', 'CoresPerPhysicalProcessor', 'LogicalProcessorsPerPhysicalProcessor', 'MaximumMemory', 
                     'OSMajor', 'OSMinor', 'OSBuildNumber', 'OSPlatformId', 'ServicePackMajor', 'ServicePackMinor', 'OSSuiteMask', 'OSProductType', 
@@ -732,7 +817,7 @@ class UALClass:
         role_ids_max_rows, role_ids_max_columns = self.role_ids_df.shape
         system_identity_max_rows, system_identity_max_columns = self.system_identity_df.shape
 
-        if ftype.lower() == 'csv':
+        if self.ftype.lower() == 'csv':
            
             if chain_db_max_rows > 0:
                 self.chain_db_df.to_csv(chained_db_csv_file, header=True, index=False, na_rep='')
@@ -743,7 +828,8 @@ class UALClass:
             if system_identity_max_rows > 0:
                 self.system_identity_df.to_csv(system_identity_csv_file, header=True, index=False, na_rep='')
 
-        elif ftype.lower() == 'json':
+
+        elif self.ftype.lower() == 'json':
             
             if chain_db_max_rows > 0:
                 json_file = chained_db_csv_file.replace('csv','json')
@@ -756,6 +842,17 @@ class UALClass:
             if system_identity_max_rows > 0:
                 json_file = system_identity_csv_file.replace('csv','json')
                 self.system_identity_df.to_json(json_file, orient='records', date_format='iso', lines=True,index=True)
+
+
+        elif self.ftype.lower() == 'sqlite':
+            conn = sqlite3.connect(self.sql_db)
+
+            self.chain_db_df.to_sql('chain_dbs', con=conn, if_exists='replace', index=False)
+            self.role_ids_df.to_sql('role_ids', con=conn, if_exists='replace', index=False)
+            self.system_identity_df.to_sql('system_identitiy', con=conn, if_exists='replace', index=False)
+            conn.commit()
+            conn.close()
+
 
         else:
 
@@ -781,6 +878,7 @@ class UALClass:
 
                 worksheet = writer.sheets['ChainDB']
                 worksheet.set_column('A:C', 50, body_format)
+                worksheet.write_row(0,0, chain_db_header, header_format)
                 worksheet.autofilter(0, 0, chain_db_max_rows, chain_db_max_columns-1)
                 worksheet.freeze_panes(1, 0)
 
@@ -826,7 +924,7 @@ class UALClass:
                 worksheet.freeze_panes(1, 0)
 
 
-    def write_chain_db(self, ftype):
+    def write_chain_db(self):
         self.plog.log('info', 'Writing Chain databases to xlsx')
         xlsx_file = os.path.join(self.out_path, 'Chain_DBs.xlsx')
         csv_file = os.path.join(self.out_path, 'CLIENTS.csv')
@@ -845,7 +943,7 @@ class UALClass:
         ra_max_rows, ra_max_columns = self.role_access_df.shape
         vm_max_rows, vm_max_columns = self.virtualmachine_df.shape
 
-        if ftype.lower() == 'csv': 
+        if self.ftype.lower() == 'csv': 
             
             if client_max_rows > 0:
                 self.client_df.to_csv(csv_file, header=True, index=False, na_rep='')
@@ -859,7 +957,8 @@ class UALClass:
             if vm_max_rows > 0:
                 self.virtualmachine_df.to_csv(vm_csv_file, header=True, index=False, na_rep='')
 
-        elif ftype.lower() == 'json':
+
+        elif self.ftype.lower() == 'json':
 
             if client_max_rows > 0:
                 json_file = csv_file.replace('csv','json')
@@ -877,8 +976,16 @@ class UALClass:
                 json_file = vm_csv_file.replace('csv','json')
                 self.virtualmachine_df.to_json(json_file, orient='records', date_format='iso', lines=True,index=True)
            
-        else:
 
+        elif self.ftype.lower() == 'sqlite':
+            conn = sqlite3.connect(self.sql_db)
+            self.client_df.to_sql('clients', con=conn, if_exists='replace', index=False, method=None)
+            self.dns_df.to_sql('dns', con=conn, if_exists='replace', index=False, method=None)
+            self.role_access_df.to_sql('role_acccess', con=conn, if_exists='replace', index=False, method=None)
+            self.virtualmachine_df.to_sql('virtual_machine', con=conn, if_exists='replace', index=False, method=None)
+            conn.close()
+
+        else:
             with pd.ExcelWriter(xlsx_file, date_format='YYYY-MM-DD HH:MM:SS') as writer:
                 workbook = writer.book
                 header_format = workbook.add_format({
@@ -900,14 +1007,13 @@ class UALClass:
                     worksheet.write_row(0, 0, client_header, header_format)
                     worksheet.set_column('A:A', 35, body_format)
                     worksheet.set_column('B:B', 50, body_format)
-                    worksheet.set_column('C:D', 30, body_format)
-                    worksheet.set_column('E:E', 25, body_format)
-                    worksheet.set_column('F:F', 15, body_format)
-                    worksheet.set_column('G:H', 25, body_format)
-                    worksheet.set_column('I:I', 40, body_format)
-                    worksheet.set_column('J:J', 15, body_format)
-                    worksheet.set_column('K:NL', 10, body_format)
-                    worksheet.set_column('NM:NM', 50, body_format)
+                    worksheet.set_column('C:E', 40, body_format)
+                    worksheet.set_column('F:G', 17, body_format)
+                    worksheet.set_column('H:I', 25, body_format)
+                    worksheet.set_column('J:J', 16, body_format)
+                    worksheet.set_column('K:K', 40, body_format)
+                    worksheet.set_column('L:L', 15, body_format)
+                    worksheet.set_column('M:M', 45, body_format)
 
                     worksheet.autofilter(0, 0, client_max_rows, client_max_columns-1)
                     worksheet.freeze_panes(1, 0)
@@ -956,40 +1062,38 @@ class UALClass:
                     worksheet.set_column('D:D', 20, body_format)
                     worksheet.set_column('E:E', 20, body_format)
                     worksheet.set_column('F:F', 150, body_format)
-
                     worksheet.write_row(0, 0, vm_header, header_format)
                     worksheet.autofilter(0, 0, vm_max_rows, vm_max_columns-1)
                     worksheet.freeze_panes(1, 0)
 
 
-
     def format_chain_df(self):
-        max_rows, max_columns = self.client_df.shape
-        if max_rows > 0:
-            left_most_columns = ['RoleName','RoleGuid', 'AuthenticatedUserName','Address', 'Country', 'TotalAccesses', 'InsertDate','LastAccess','TenantId','ClientName']
-            right_most_colums = sorted(list([a for a in self.client_df.columns if a not in left_most_columns]))
-            client_header = left_most_columns + right_most_colums
-            self.client_df = self.client_df.reindex(columns=(left_most_columns + right_most_colums))
-
-        return client_header
+        header = ['RoleName','RoleGuid', 'AuthenticatedUserName','Address','DNSLookup','Country',
+                    'TotalAccesses','InsertDate','LastAccess','OtherAccessCount','TenantId','ClientName','Source_File']
+        if self.ftype.lower() == 'sqlite':
+            #julian_columns = list([a for a in self.client_df.columns if a not in header])
+            header = header + list([a for a in self.client_df.columns if a not in header])
+    
+        self.client_df = self.client_df.reindex(columns=(header))
+        return header
 
 
     def format_dns_df(self):
-        dns_header = ['LastSeen','Address','HostName','Country','Source_File']
-        self.dns_df = self.dns_df.reindex(columns=(dns_header))
-        return dns_header
+        header = ['LastSeen','Address','HostName','Country','Source_File']
+        self.dns_df = self.dns_df.reindex(columns=(header))
+        return header
 
 
     def format_role_access_df(self):
-        role_access_header = ['RoleGuid','FirstSeen','LastSeen','Source_File']
-        self.role_access_df = self.role_access_df.reindex(columns=(role_access_header))
-        return role_access_header
+        header = ['RoleGuid','FirstSeen','LastSeen','Source_File']
+        self.role_access_df = self.role_access_df.reindex(columns=(header))
+        return header
 
 
     def format_vm_df(self):
-        vm_header = ['VmGuid','BIOSGuid','CreationTime','LastSeenActive','SerialNumber','Source_File']
-        self.virtualmachine_df = self.virtualmachine_df.reindex(columns=(vm_header))
-        return vm_header 
+        header = ['VmGuid','BIOSGuid','CreationTime','LastSeenActive','SerialNumber','Source_File']
+        self.virtualmachine_df = self.virtualmachine_df.reindex(columns=(header))
+        return header 
 
 
 
@@ -997,7 +1101,7 @@ def main():
     parser = ArgumentParser(prog='UAL Processing', description='Parsing and Processing of the UAL ese databases.', usage='%(prog)s [options]', epilog='Version: {}'.format(__version__))
     parser.add_argument('-d', help='Path to directory contianing the database "\Windows\System32\LogFiles\SUM\" (Required)', action='store', dest='raw_input_path')
     parser.add_argument('-o', help='Path to write the output files (Required)', action='store', dest='raw_output_path') 
-    parser.add_argument('-t', help='Output Type,Supported CSV, json and XLSX (Optional, default xlsx)', action='store', dest='ftype')                  
+    parser.add_argument('-t', help='Output Type,Supported csv, json, sqlite and xlsx (Optional, default xlsx)', action='store', dest='ftype')                  
     parser.add_argument('--debug', help='Debug mode (More output to logs for troubleshooting)', action="store_true")
     parser.add_argument('-v', help='Show Version and exit.', action="store_true")
     args = parser.parse_args()
@@ -1035,13 +1139,15 @@ def main():
         else:
             ftype = args.ftype
         
+        config_dict = {
+            'raw_input_path':args.raw_input_path, 
+            'raw_output_path': args.raw_output_path, 
+            'maxminddb': maxminddb, 
+            'ftype': ftype,
+            'p_log': p_log
+        }
 
-        parser = UALClass(args.raw_input_path, args.raw_output_path, maxminddb, p_log)
-        parser.process_system_identity()
-        parser.ual_db_check()
-        parser.process_chained_databases()
-        parser.write_system_identity(ftype)
-        parser.write_chain_db(ftype)
+        parser = UALClass(config_dict)
 
         end_time = time.time()
         total_minutes = ((end_time - script_start)/60)
