@@ -1,6 +1,6 @@
 # UAL
 
-<em>Usage: </em>
+<em><b>Usage: </b></em>
 <code>UALParser.py -d **path_to_sum_dir* -o *path_to_write the data* -t *output_type*</code>
 
 This script was inspired by KStrike written by Brian Moran and Eric Zimmerman's SumECmd.exe.
@@ -24,7 +24,7 @@ Current.mdb and all Chained Databases
 - Enrichments from DNS and ROLE_ACCESS table.
 - TODO: Test VIRTUALMACHINES Table processing.  The processing is coded in, but since no data has been found for testing, data in this table could bork the script.
 
-This script does not rely on pre-defined dictionaries for GUID dictionary and that in theory should make it with stand changes made by Microsoft.  Some role_ids GUIDs are pre-populated with known values, but will only be used in the event there were no role_ids GUIDs found in the SystemIdentity ESE tables or if the SystemIdentity ESE database is not processed.
+This script does not rely on pre-defined dictionaries for GUID dictionary and that in theory should make it withstand changes made by Microsoft.  Some role_ids GUIDs are pre-populated with known values, but will only be used in the event there were no role_ids GUIDs found in the SystemIdentity ESE tables or if the SystemIdentity ESE database is not processed.
 
 <b>Current Requirements:</b>
 - Python 3 (Developed and tested with Python 3.9)

@@ -89,15 +89,15 @@ class LogClass:
         current_user = getpass.getuser()
 
         # log_format = '%(asctime)s:%(levelname)s:%(message)s'
-        #date_fmt = '%m/%d/%Y %I:%M:%S'
+        # date_fmt = '%m/%d/%Y %I:%M:%S'
         # logging.basicConfig(filename=logname, format=log_format, level=debug_level, filemode='a', datefmt=date_fmt)
         # console = logging.StreamHandler()
         # console.setLevel(debug_level)
 
-        #formatter = logging.Formatter(log_format)
+        # formatter = logging.Formatter(log_format)
         
         # console.setFormatter(formatter)
-        #logging.getLogger('').addHandler(console)
+        # logging.getLogger('').addHandler(console)
 
         clr_log_format = '%(asctime)s:%(hostname)s:%(programname)s:%(username)s[%(process)d]:%(levelname)s:%(message)s'
         coloredlogs.install(level=debug_level, fmt=clr_log_format)
@@ -1071,7 +1071,6 @@ class UALClass:
         header = ['RoleName','RoleGuid', 'AuthenticatedUserName','Address','DNSLookup','Country',
                     'TotalAccesses','InsertDate','LastAccess','OtherAccessCount','TenantId','ClientName','Source_File']
         if self.ftype.lower() == 'sqlite':
-            #julian_columns = list([a for a in self.client_df.columns if a not in header])
             header = header + list([a for a in self.client_df.columns if a not in header])
     
         self.client_df = self.client_df.reindex(columns=(header))
