@@ -23,7 +23,7 @@ from binascii import unhexlify
 from struct import unpack
 
 __author__ = 'Tim Taylor'
-__version__ = '20211106'
+__version__ = '20230815'
 __credit__ = 'Inspired by BriMor Labs/KStrike'
 
 """
