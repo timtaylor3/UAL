@@ -20,8 +20,6 @@ from argparse import ArgumentParser
 from configparser import ConfigParser
 from datetime import datetime, timedelta
 from binascii import unhexlify
-from pandas.core.frame import DataFrame
-from pandas.io.parsers import ParserError
 from struct import unpack
 
 __author__ = 'Tim Taylor'
@@ -162,10 +160,10 @@ class UALClass:
         self.ftype = config_dict['ftype']
         self.plog = config_dict['p_log']
         self.sql_db = os.path.join(self.out_path, 'UAL.db')
-        self.GUID = list()
+        self.GUID:list = list()
         self.chained_databases = dict()
-        self.system_identity = list()
-        self.series_list = list()
+        self.system_identity:list = list()
+        self.series_list:list = list()
         self.chain_db_df = pd.DataFrame() 
         self.role_ids_df = pd.DataFrame()
         self.system_identity_df = pd.DataFrame() 
@@ -224,7 +222,7 @@ class UALClass:
             if not (current_mdb.endswith('SystemIdentity.mdb')):
                 self.plog.log('info', 'Processing DB File: {} '.format(current_mdb))
                 table = ''
-                table_list = list()
+                
                 
                 try:
                     file_object = open(current_mdb, "rb")
@@ -240,9 +238,9 @@ class UALClass:
                     self.plog.log('Critical', '{} was not parsed'.format(current_mdb))
                     pass
 
-
                 number_of_tables = esedb_file.get_number_of_tables() 
-
+                
+                table_list = list()
                 for i in range(0, number_of_tables):
                     table_dict = dict()
                     table_dict['number'] = i
@@ -273,14 +271,18 @@ class UALClass:
 
 
     def process_dns_table(self, current_mdb, esedb_file,table_info):
+        dns_list:list = list()
         if table_info['num_records'] > 0:
             self.plog.log('info', 'Processing {} records in the DNS table'.format(table_info['num_records']))
             table = esedb_file.get_table(table_info['number'])
             c = 0
+            
             for t in range(0, table_info['num_records']):
+                
                 c+=1
                 r = table.get_record(t)
                 dns = dict()
+                
                 ip_address = self.get_raw_data(r, r.get_column_type(1), 1).decode('utf-16').rstrip('\x00')
                 dns[r.get_column_name(0)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(0), 0))
                 dns[r.get_column_name(1)] = str(ip_address) 
@@ -304,17 +306,26 @@ class UALClass:
                         dns['Country'] = ', '.join([dns['Country'], 'Link Local'])
 
                 dns['Source_File'] = os.path.basename(current_mdb)
-                self.dns_df = self.dns_df.append(dns, ignore_index=True)  
-                if c % 250 == 0:
+                
+                dns_list.append(dns)
+
+                if c % 1000 == 0:
+                    self.dns_df = pd.concat([self.dns_df, pd.DataFrame(dns_list)], ignore_index=True, sort=False)
+                    dns_list.clear()
                     self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
+
+            self.dns_df = pd.concat([self.dns_df, pd.DataFrame(dns_list)], ignore_index=True, sort=False)
             self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
+
 
         else:
             self.plog.log('info', 'There were no records in the DNS table')
 
 
     def process_clients_table(self, current_mdb, esedb_file, table_info):
-    
+        
+        source_file = os.path.basename(current_mdb)
+
         if table_info['num_records'] > 0:
             self.plog.log('info', 'Processing {} records in the Client table'.format(table_info['num_records']))
             table = esedb_file.get_table(table_info['number'])
@@ -352,8 +363,7 @@ class UALClass:
                 else:
                     
                     ip = str(ip_address)    
-                    source_file = os.path.basename(current_mdb)  
-
+                    
                     host_name_row_df = self.dns_df.query('Address == @ip and Source_File == @source_file')
                     
                     if host_name_row_df.empty:
@@ -383,17 +393,19 @@ class UALClass:
                 # Noted in research there is a guid.mdb for the current year.
                 # Since I don't know how the guids are derived each new year, I'm not hard coding the guid to year mapping
                 # Best Effort to get the correct year is attempted
-
+                
                 current_year = ''
                 if source_file == 'Current.mdb':
                     current_year = client['LastAccess'][:4]
                 
                 else:
                     current_year = self.get_year(source_file)
+
                     if not current_year:
                         current_year = client['LastAccess'][:4]
 
                 access_dates = list()
+                client_list = list()
                 for c_num in range (8, table_info['num_columns']):
                     c_name =r.get_column_name(c_num)
                     c_value = self.get_raw_data(r, r.get_column_type(c_num), c_num)
@@ -405,24 +417,33 @@ class UALClass:
                         access_dates.append('{}: {}'.format(converted_j_date, c_value))
                         
                     client[r.get_column_name(c_num)] = self.get_raw_data(r, r.get_column_type(c_num), c_num)
-                    # ''.join(access_dates).strip(', ')  
+                    
                     client['OtherAccessCount'] = ', '.join(access_dates).strip(', ')  
 
                 client['Source_File'] = source_file
-                
-                self.client_df = self.client_df.append(client, ignore_index=True)  
+                client_list.append(client)
 
-                if c % 250 == 0:
+                if c % 1000 == 0:
+                    self.client_df = pd.concat([self.client_df, pd.DataFrame(client_list)], ignore_index=True, sort=False)
+                    client_list.clear()  # Removes elements
+                    
                     self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
+
+            self.client_df = pd.concat([self.client_df, pd.DataFrame(client_list)], ignore_index=True, sort=False)
             self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
         else:
             self.plog.log('info', 'There were no records in the Client table')
 
 
     def process_role_access_table(self, current_mdb, esedb_file, table_info):
+        
         if table_info['num_records'] > 0:
+           
             self.plog.log('info', 'Processing {} records in the ROLE_ACCESS table'.format(table_info['num_records']))
             table = esedb_file.get_table(table_info['number'])
+            
+            ra_list:list = list()
+            
             for t in range(0, table_info['num_records']):
                 r = table.get_record(t)
                 ra = dict()
@@ -430,7 +451,10 @@ class UALClass:
                 ra[r.get_column_name(1)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(1), 1))
                 ra[r.get_column_name(2)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(2), 2))
                 ra['Source_File'] = os.path.basename(current_mdb)
-                self.role_access_df = self.role_access_df.append(ra, ignore_index=True)  
+                ra_list.append(ra)
+
+            self.role_access_df = pd.concat([self.role_access_df, pd.DataFrame(ra_list)], ignore_index=True, sort=False)
+
         else:
             self.plog.log('info', 'There were no records in the ROLE_ACCESS table')   
 
@@ -449,7 +473,7 @@ class UALClass:
                 vm[r.get_column_name(4)] = self.get_raw_data(r, r.get_column_type(4), 4)
                 vm['Source_File'] = os.path.basename(current_mdb)
                 
-            self.virtualmachine_df = self.virtualmachine_df.append(vm, ignore_index=True)  
+            self.virtualmachine_df = pd.concat([self.client_df, vm], ignore_index=True, sort=False)
         else:
             self.plog.log('info', 'There were no records in the VIRTUALMACHINES table')
 
@@ -490,7 +514,7 @@ class UALClass:
                     table_list.append(table_dict)
 
                 for item in table_list:
-    
+                    
                     if item['name'] == 'ROLE_IDS':
                         table = esedb_file.get_table(item['number'])
                         self.plog.log('info', 'Processing {} records in the ROLE_IDS table'.format(item['num_records']))
@@ -502,7 +526,8 @@ class UALClass:
                             GUID_dict['ProductName'] = self.get_raw_data(record, record.get_column_type(1), 1).decode('utf-16').rstrip('\x00')
                             GUID_dict['RoleName'] = self.get_raw_data(record, record.get_column_type(2), 2).decode('utf-16').rstrip('\x00')
                             self.GUID.append(GUID_dict)
-                        self.role_ids_df = self.role_ids_df.append( self.GUID, ignore_index=True)         
+
+                        self.role_ids_df = pd.concat([self.client_df, pd.DataFrame(self.GUID)], ignore_index=True, sort=False)       
 
                         # re-setting the dictionary since we have a better data from this table
                         self.role_ids = dict()
@@ -513,13 +538,17 @@ class UALClass:
                     elif item['name'] == 'CHAINED_DATABASES':
                         table = esedb_file.get_table(item['number'])
                         self.plog.log('info', 'Processing {} records in the CHAINED_DATABASES table'.format(item['num_records']))
-                        chained_databases = dict()
+                        
+                        
+                        chained_databases_list = list()
                         for t in range(0, item['num_records']):
+                            chained_databases = dict()
                             record = table.get_record(t)
                             chained_databases['Year'] = str(record.get_value_data_as_integer(0))
                             chained_databases['FileName'] = record.get_value_data(1).decode('utf-16', 'ignore').rstrip('\x00')
-
-                            self.chain_db_df = self.chain_db_df.append(chained_databases, ignore_index=True) 
+                            chained_databases_list.append(chained_databases)
+                        
+                        self.chain_db_df = pd.concat([self.client_df, pd.DataFrame(chained_databases_list)], ignore_index=True, sort=False) 
                 
                     elif item['name'] == 'SYSTEM_IDENTITY':
                         
@@ -564,7 +593,9 @@ class UALClass:
                             system_identity['OSCountryCode'] = self.get_raw_data(r, r.get_column_type(22), 22).decode('utf-16').rstrip('\x00')
                             system_identity['OSLastBootUpTime'] = self.get_raw_data(r, r.get_column_type(23), 23).decode('utf-16').rstrip('\x00')
                             self.system_identity.append(system_identity)
-                        self.system_identity_df = self.system_identity_df.append(self.system_identity, ignore_index=True) 
+
+
+                        self.system_identity_df = pd.concat([self.system_identity_df, pd.DataFrame(self.system_identity)], ignore_index=True, sort=False) 
 
                     else:
                         self.plog.log('WARN', 'No Tables processed in SystemIdentity.mdb')      
@@ -575,12 +606,7 @@ class UALClass:
 
     def get_table_data(self):
 
-       # record = pd.Series(series_list, index=header) 
-       # df = df.append(record, ignore_index=True) 
-
-
        for file in self.get_ese_files:
-           print(file)
            table = ''
            table_list = list()
            table_num_columns  = 0
@@ -847,9 +873,15 @@ class UALClass:
         elif self.ftype.lower() == 'sqlite':
             conn = sqlite3.connect(self.sql_db)
 
-            self.chain_db_df.to_sql('chain_dbs', con=conn, if_exists='replace', index=False)
-            self.role_ids_df.to_sql('role_ids', con=conn, if_exists='replace', index=False)
-            self.system_identity_df.to_sql('system_identitiy', con=conn, if_exists='replace', index=False)
+            if chain_db_max_rows > 0:
+                self.chain_db_df.to_sql('chain_dbs', con=conn, if_exists='replace', index=False)
+            
+            if role_ids_max_rows > 0:
+                self.role_ids_df.to_sql('role_ids', con=conn, if_exists='replace', index=False)
+
+            if system_identity_max_rows > 0:
+                self.system_identity_df.to_sql('system_identitiy', con=conn, if_exists='replace', index=False)
+                
             conn.commit()
             conn.close()
 
