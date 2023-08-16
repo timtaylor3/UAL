@@ -1,27 +1,21 @@
 import coloredlogs
 import datetime
-import errno
 import ipaddress
 import logging
 import maxminddb
-# import os
-from numpy import source
 import pandas as pd
-import getpass
 import pyesedb as esedb
 import sqlite3
 import sys
 import traceback
 import uuid
-import struct
-import time
 from argparse import ArgumentParser
 from binascii import hexlify, unhexlify
 from configparser import ConfigParser
 from datetime import datetime, timedelta
 from pathlib import Path
-
 from struct import unpack
+from time import time
 
 __author__ = 'Tim Taylor'
 __version__ = '20230815'
@@ -73,6 +67,8 @@ https://advisory.kpmg.us/blog/2021/digital-forensics-incident-response.html
 https://en.wikipedia.org/wiki/Extensible_Storage_Engine
 
 """
+# TODO:  Add code comments
+# TODO:  Change out pandas for polars
 
 class UALClass:
     def __init__(self, config_dict):
@@ -143,6 +139,7 @@ class UALClass:
                     esedb_file.open_file_object(file_object)
 
                 except OSError as error:
+                    # Not sure if this is the correct error.
                     logging.critical(f'Invalid ESE database: {error}')
                     logging.critical(f'Exception class is: {error.__class__}')
                     logging.critical(f'Exception is: {error.args}')
@@ -211,7 +208,10 @@ class UALClass:
                     dns['Country'] = 'Private'
 
                 else: 
-                    dns['Country'] = self.maxminddb_lookup(ip_address)  
+                    if self.maxmind_db.is_file():
+                        dns['Country'] = self.maxminddb_lookup(ip_address)  
+                    else:
+                        dns['Country'] =  'No maxmind db'
 
                 if ip_address.version == 6:
                     link_local = ip_address.is_link_local
@@ -221,11 +221,6 @@ class UALClass:
                 dns['Source_File'] = current_mdb.name
                 
                 dns_list.append(dns)
-
-                #if c % 1000 == 0:
-                #    self.dns_df = pd.concat([self.dns_df, pd.DataFrame(dns_list)], ignore_index=True, sort=False)
-                #    dns_list.clear()
-                #    logging.info(f'Added {str(c)} Records of {table_info["num_records"]}')
 
             self.dns_df = pd.concat([self.dns_df, pd.DataFrame(dns_list)], ignore_index=True, sort=False)
             logging.info(f'Added {str(c)} Records of {table_info["num_records"]}')
@@ -242,6 +237,7 @@ class UALClass:
             logging.info(f'Processing {table_info["num_records"]} records in the Client table')
             table = esedb_file.get_table(table_info['number'])
             c=0
+            client_list = list()
             for t in range(0, table_info['num_records']):
                 c+=1
                 r = table.get_record(t)
@@ -261,7 +257,10 @@ class UALClass:
                 if ip_address.is_private:
                     client['Country'] = 'Private'
                 else: 
-                    client['Country'] = self.maxminddb_lookup(ip_address)  
+                    if self.maxmind_db.is_file():
+                        client['Country'] = self.maxminddb_lookup(ip_address)  
+                    else:
+                        client['Country'] =  'No maxmind db'
 
                 if ip_address.version == 6:
                     link_local = ip_address.is_link_local
@@ -273,9 +272,7 @@ class UALClass:
                     client['DNSLookup'] = 'No DNS Data Found'
                 
                 else:
-                    
                     ip = str(ip_address)    
-                    
                     host_name_row_df = self.dns_df.query('Address == @ip and Source_File == @source_file')
                     
                     if host_name_row_df.empty:
@@ -302,10 +299,6 @@ class UALClass:
                 client[r.get_column_name(6)] = self.get_raw_data(r, r.get_column_type(6), 6).decode('utf-16').rstrip('\x00')
                 client[r.get_column_name(7)] = self.get_raw_data(r, r.get_column_type(7), 7)
                 
-                # Noted in research there is a guid.mdb for the current year.
-                # Since I don't know how the guids are derived each new year, I'm not hard coding the guid to year mapping
-                # Best Effort to get the correct year is attempted
-                
                 current_year = ''
                 if source_file == 'Current.mdb':
                     current_year = client['LastAccess'][:4]
@@ -317,7 +310,7 @@ class UALClass:
                         current_year = client['LastAccess'][:4]
 
                 access_dates = list()
-                client_list = list()
+                
                 for c_num in range (8, table_info['num_columns']):
                     c_name =r.get_column_name(c_num)
                     c_value = self.get_raw_data(r, r.get_column_type(c_num), c_num)
@@ -335,14 +328,9 @@ class UALClass:
                 client['Source_File'] = source_file
                 client_list.append(client)
 
-                if c % 1000 == 0:
-                    self.client_df = pd.concat([self.client_df, pd.DataFrame(client_list)], ignore_index=True, sort=False)
-                    client_list.clear()  # Removes elements
-                    
-                    logging.info(f'Added {str(c)} Records of {table_info["num_records"]}')
-
             self.client_df = pd.concat([self.client_df, pd.DataFrame(client_list)], ignore_index=True, sort=False)
             logging.info(f'Added {str(c)} Records of {table_info["num_records"]}')
+        
         else:
             logging.info(f'There were no records in the Client table')
 
@@ -386,6 +374,7 @@ class UALClass:
                 vm['Source_File'] = current_mdb.name
                 
             self.virtualmachine_df = pd.concat([self.client_df, vm], ignore_index=True, sort=False)
+        
         else:
             logging.info(f'There were no records in the VIRTUALMACHINES table')
 
@@ -406,6 +395,7 @@ class UALClass:
                     esedb_file.open_file_object(file_object)
 
                 except OSError as error:
+                    # Not sure if this is the correct error
                     logging.critical(f'Invalid ESE database: {error}')
                     logging.critical(f'Exception class is: {error.__class__}')
                     logging.critical(f'Exception is: {error.args}')
@@ -552,11 +542,10 @@ class UALClass:
 
 
     def binary_to_datetime(self, date_binary): 
-
-       decimal_value = int(struct.unpack("<Q",date_binary)[0]) 
+       decimal_value = int(unpack("<Q",date_binary)[0]) 
 
        try:
-           hr_datetime = datetime(1601,1,1,0,0,0) + timedelta(microseconds=decimal_value/10) #Yay math!
+           hr_datetime = datetime(1601,1,1,0,0,0) + timedelta(microseconds=decimal_value/10)
     
        except:
            hr_datetime = "UNRECOGNIZED TIMESTAMP"
@@ -609,9 +598,9 @@ class UALClass:
                 if result == 'Country Not Found':                     
                     result = geo_dict['registered_country'].get('iso_code', 'Registered Country Not Found') 
             else:
-                result = 'No Maxmind record found for {}'.format(str(ip_address))
-                
-        logging.debug(f'{result}')
+                result = f'No Maxmind record found for {str(ip_address)}'
+                logging.debug(f'{result}')
+
         return result
 
 
@@ -1058,7 +1047,7 @@ def main():
         parser.print_help()
         sys.exit(-1)
     
-    script_start = time.time()
+    script_start = time()
     
     level_change: str = 'INFO'
     if args.debug:
@@ -1105,7 +1094,7 @@ def main():
 
         parser = UALClass(config_dict)
 
-        script_end = time.time()
+        script_end = time()
         seconds = script_end - script_start
         hours, minutes, seconds = calculate_hms_from_seconds(seconds)
         logging.info(f'Time to execute {script_name}, version {__version__} files was {minutes:.0f} Minutes {seconds:.2f} Seconds')
