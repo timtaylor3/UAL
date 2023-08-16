@@ -4,7 +4,7 @@ import errno
 import ipaddress
 import logging
 import maxminddb
-import os
+# import os
 from numpy import source
 import pandas as pd
 import getpass
@@ -13,13 +13,14 @@ import sqlite3
 import sys
 import traceback
 import uuid
-import binascii
 import struct
 import time
 from argparse import ArgumentParser
+from binascii import hexlify, unhexlify
 from configparser import ConfigParser
 from datetime import datetime, timedelta
-from binascii import unhexlify
+from pathlib import Path
+
 from struct import unpack
 
 __author__ = 'Tim Taylor'
@@ -73,93 +74,16 @@ https://en.wikipedia.org/wiki/Extensible_Storage_Engine
 
 """
 
-class LogClass:
-    def __init__(self, logname, debug_level=20):
-
-        """
-        Critical == 50
-        Error == 40
-        Warning == 30
-        Info == 20
-        Debug == 10
-        Notset = 0
-        """
-        current_user = getpass.getuser()
-
-        # log_format = '%(asctime)s:%(levelname)s:%(message)s'
-        # date_fmt = '%m/%d/%Y %I:%M:%S'
-        # logging.basicConfig(filename=logname, format=log_format, level=debug_level, filemode='a', datefmt=date_fmt)
-        # console = logging.StreamHandler()
-        # console.setLevel(debug_level)
-
-        # formatter = logging.Formatter(log_format)
-        
-        # console.setFormatter(formatter)
-        # logging.getLogger('').addHandler(console)
-
-        clr_log_format = '%(asctime)s:%(hostname)s:%(programname)s:%(username)s[%(process)d]:%(levelname)s:%(message)s'
-        coloredlogs.install(level=debug_level, fmt=clr_log_format)
-
-
-    @staticmethod
-    def log(level='info', message=''):
-        if level.lower() == 'debug':
-            logging.debug(message)
-        if level.lower() == 'info':
-            logging.info(message)
-        if level.lower() == 'warning':
-            logging.warning(message)
-        if level.lower() == 'error':
-            logging.error(message)
-        if level.lower() == 'critical':
-            logging.critical(message)
-
-
-class PrepClass:
-    def __init__(self, raw_output_path):
-        self.raw_output_path = raw_output_path
-        self.log_file = os.path.join(self.raw_output_path, 'Script Processing.log')
-        self.sql_db = os.path.join(self.raw_output_path, 'UAL_DB.sqlite')
-        self.sql_file = ''
-        self.db_setup = ''
-        self.p_log = ''
-        self.config = ''
-
-    
-    def setup_logging(self, debug_mode=False):  
-        log_level = 'info'
-        if debug_mode: 
-            log_level = 'debug'
-
-        numeric_level = getattr(logging, log_level.upper(), None)
-        if not isinstance(numeric_level, int):
-            raise ValueError('Invalid log level: %s' % log_level)
-
-        self.p_log = LogClass(self.log_file, numeric_level)
-        return self.p_log
-
-
-
-    def setup_output_directory(self):
-        if not os.path.exists(self.raw_output_path):
-            try:
-                os.makedirs(self.raw_output_path)
-            except OSError as error:
-                if error.errno != errno.EEXIST:
-                    raise
-
-
 class UALClass:
     def __init__(self, config_dict):
 
         self.config_dict = config_dict
         self.source_path =  config_dict['raw_input_path']
-        self.ese_dbs = self.get_ese_files(self.source_path)
+        self.ese_dbs = list(Path(self.source_path).glob('*.mdb'))
         self.out_path =  config_dict['raw_output_path']
         self.maxmind_db = config_dict['maxminddb']
         self.ftype = config_dict['ftype']
-        self.plog = config_dict['p_log']
-        self.sql_db = os.path.join(self.out_path, 'UAL.db')
+        self.sql_db = str(Path(self.out_path).joinpath('UAL.db'))
         self.GUID:list = list()
         self.chained_databases = dict()
         self.system_identity:list = list()
@@ -206,36 +130,25 @@ class UALClass:
         self.write_chain_db()
 
 
-    def get_ese_files(self,source_path):
-       ese_dbs = list()
-       all_files = os.listdir(source_path)
-       for file in all_files:
-           if file.endswith('.mdb'):
-               ese_dbs.append(os.path.join(source_path, file))
-    
-       return ese_dbs
-
-
     def process_chained_databases(self):
         
         for current_mdb in self.ese_dbs:
-            if not (current_mdb.endswith('SystemIdentity.mdb')):
-                self.plog.log('info', 'Processing DB File: {} '.format(current_mdb))
+            if not current_mdb.name == 'SystemIdentity.mdb':
+                logging.info(f'Processing DB File: {current_mdb.name}')
                 table = ''
-                
-                
+                       
                 try:
                     file_object = open(current_mdb, "rb")
                     esedb_file = esedb.file() 
                     esedb_file.open_file_object(file_object)
 
                 except OSError as error:
-                    self.plog.log('Critical', 'Invalid ESE database: {}'.format(error))
-                    self.plog.log('Critical', 'Exception class is: {}'.format(error.__class__))
-                    self.plog.log('Critical', 'Exception is: {}'.format(error.args))
+                    logging.critical(f'Invalid ESE database: {error}')
+                    logging.critical(f'Exception class is: {error.__class__}')
+                    logging.critical(f'Exception is: {error.args}')
                     exc_type, exc_value, exc_tb = sys.exc_info()
-                    self.plog.log('Critical', traceback.format_exception(exc_type, exc_value, exc_tb)) 
-                    self.plog.log('Critical', '{} was not parsed'.format(current_mdb))
+                    logging.critical(traceback.format_exception(exc_type, exc_value, exc_tb)) 
+                    logging.critical(f'{current_mdb.name} was not parsed')
                     pass
 
                 number_of_tables = esedb_file.get_number_of_tables() 
@@ -253,32 +166,32 @@ class UALClass:
                 # Need to ensure DNS is processed first.
                 for item in table_list:
                     if item['name'] ==  'DNS':
-                        self.plog.log('info', 'Processing {} '.format(item['name']))
-                        dns_dict = self.process_dns_table(current_mdb, esedb_file, item)
+                        logging.info(f'Processing {item["name"]} '.format())
+                        self.process_dns_table(current_mdb, esedb_file, item)
 
                 for item in table_list:
                     if item['name'] ==  'CLIENTS':
-                        self.plog.log('info', 'Processing {} '.format(item['name']))
+                        logging.info(f'Processing {item["name"]} '.format())
                         self.process_clients_table(current_mdb, esedb_file, item)
 
                     if item['name'] ==  'ROLE_ACCESS':
-                        self.plog.log('info', 'Processing {} '.format(item['name']))
+                        logging.info(f'Processing {item["name"]} '.format())
                         self.process_role_access_table(current_mdb, esedb_file, item)
 
                     if item['name'] ==  'VIRTUALMACHINES':
-                        self.plog.log('info', 'Processing {} '.format(item['name']))
+                        logging.info(f'Processing {item["name"]} '.format())
                         self.process_virtualmachines_table(current_mdb, esedb_file, item)
 
 
     def process_dns_table(self, current_mdb, esedb_file,table_info):
-        dns_list:list = list()
+        
         if table_info['num_records'] > 0:
-            self.plog.log('info', 'Processing {} records in the DNS table'.format(table_info['num_records']))
+            logging.info(f'Processing {table_info["num_records"]} records in the DNS table')
             table = esedb_file.get_table(table_info['number'])
             c = 0
-            
-            for t in range(0, table_info['num_records']):
-                
+
+            dns_list:list = list()
+            for t in range(0, table_info['num_records']):    
                 c+=1
                 r = table.get_record(t)
                 dns = dict()
@@ -305,29 +218,28 @@ class UALClass:
                     if link_local:
                         dns['Country'] = ', '.join([dns['Country'], 'Link Local'])
 
-                dns['Source_File'] = os.path.basename(current_mdb)
+                dns['Source_File'] = current_mdb.name
                 
                 dns_list.append(dns)
 
-                if c % 1000 == 0:
-                    self.dns_df = pd.concat([self.dns_df, pd.DataFrame(dns_list)], ignore_index=True, sort=False)
-                    dns_list.clear()
-                    self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
+                #if c % 1000 == 0:
+                #    self.dns_df = pd.concat([self.dns_df, pd.DataFrame(dns_list)], ignore_index=True, sort=False)
+                #    dns_list.clear()
+                #    logging.info(f'Added {str(c)} Records of {table_info["num_records"]}')
 
             self.dns_df = pd.concat([self.dns_df, pd.DataFrame(dns_list)], ignore_index=True, sort=False)
-            self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
-
+            logging.info(f'Added {str(c)} Records of {table_info["num_records"]}')
 
         else:
-            self.plog.log('info', 'There were no records in the DNS table')
+            logging.info(f'There were no records in the DNS table')
 
 
     def process_clients_table(self, current_mdb, esedb_file, table_info):
         
-        source_file = os.path.basename(current_mdb)
+        source_file = current_mdb.name
 
         if table_info['num_records'] > 0:
-            self.plog.log('info', 'Processing {} records in the Client table'.format(table_info['num_records']))
+            logging.info(f'Processing {table_info["num_records"]} records in the Client table')
             table = esedb_file.get_table(table_info['number'])
             c=0
             for t in range(0, table_info['num_records']):
@@ -427,19 +339,19 @@ class UALClass:
                     self.client_df = pd.concat([self.client_df, pd.DataFrame(client_list)], ignore_index=True, sort=False)
                     client_list.clear()  # Removes elements
                     
-                    self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
+                    logging.info(f'Added {str(c)} Records of {table_info["num_records"]}')
 
             self.client_df = pd.concat([self.client_df, pd.DataFrame(client_list)], ignore_index=True, sort=False)
-            self.plog.log('info', 'Added {} Records of {}'.format(str(c), table_info['num_records']))
+            logging.info(f'Added {str(c)} Records of {table_info["num_records"]}')
         else:
-            self.plog.log('info', 'There were no records in the Client table')
+            logging.info(f'There were no records in the Client table')
 
 
     def process_role_access_table(self, current_mdb, esedb_file, table_info):
         
         if table_info['num_records'] > 0:
            
-            self.plog.log('info', 'Processing {} records in the ROLE_ACCESS table'.format(table_info['num_records']))
+            logging.info(f'Processing {table_info["num_records"]} records in the ROLE_ACCESS table')
             table = esedb_file.get_table(table_info['number'])
             
             ra_list:list = list()
@@ -450,18 +362,18 @@ class UALClass:
                 ra[r.get_column_name(0)] = self.get_raw_data(r, r.get_column_type(0), 0)
                 ra[r.get_column_name(1)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(1), 1))
                 ra[r.get_column_name(2)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(2), 2))
-                ra['Source_File'] = os.path.basename(current_mdb)
+                ra['Source_File'] = current_mdb.name
                 ra_list.append(ra)
 
             self.role_access_df = pd.concat([self.role_access_df, pd.DataFrame(ra_list)], ignore_index=True, sort=False)
 
         else:
-            self.plog.log('info', 'There were no records in the ROLE_ACCESS table')   
+            logging.info(f'There were no records in the ROLE_ACCESS table')   
 
 
     def process_virtualmachines_table(self, current_mdb, esedb_file, table_info):
         if table_info['num_records'] > 0:
-            self.plog.log('info', 'Processing {} records in the VirtualMachines table'.format(table_info['num_records']))
+            logging.info(f'Processing {table_info["num_records"]} records in the VirtualMachines table')
             table = esedb_file.get_table(table_info['number'])
             for t in range(0, table_info['num_records']):
                 r = table.get_record(t)
@@ -471,19 +383,19 @@ class UALClass:
                 vm[r.get_column_name(2)] = self.get_raw_data(r, r.get_column_type(2), 2)
                 vm[r.get_column_name(3)] = self.get_raw_data(r, r.get_column_type(3), 3)
                 vm[r.get_column_name(4)] = self.get_raw_data(r, r.get_column_type(4), 4)
-                vm['Source_File'] = os.path.basename(current_mdb)
+                vm['Source_File'] = current_mdb.name
                 
             self.virtualmachine_df = pd.concat([self.client_df, vm], ignore_index=True, sort=False)
         else:
-            self.plog.log('info', 'There were no records in the VIRTUALMACHINES table')
+            logging.info(f'There were no records in the VIRTUALMACHINES table')
 
 
     def process_system_identity(self):
     
-        system_identity_file = os.path.join(self.source_path, 'SystemIdentity.mdb')
-        if os.path.isfile(system_identity_file):
+        system_identity_file = self.source_path.joinpath('SystemIdentity.mdb')
+        if system_identity_file.is_file():
 
-            self.plog.log('info', 'Processing {} '.format(os.path.basename(system_identity_file)))
+            logging.info(f'Processing {system_identity_file.name}')
 
             if system_identity_file:
                 table = ''
@@ -494,12 +406,12 @@ class UALClass:
                     esedb_file.open_file_object(file_object)
 
                 except OSError as error:
-                    self.plog.log('Critical', 'Invalid ESE database: {}'.format(error))
-                    self.plog.log('Critical', 'Exception class is: {}'.format(error.__class__))
-                    self.plog.log('Critical', 'Exception is: {}'.format(error.args))
+                    logging.critical(f'Invalid ESE database: {error}')
+                    logging.critical(f'Exception class is: {error.__class__}')
+                    logging.critical(f'Exception is: {error.args}')
                     exc_type, exc_value, exc_tb = sys.exc_info()
-                    self.plog.log('Critical', traceback.format_exception(exc_type, exc_value, exc_tb)) 
-                    self.plog.log('Critical', '{} was not parsed'.format(system_identity_file))
+                    logging.critical(traceback.format_exception(exc_type, exc_value, exc_tb)) 
+                    logging.critical(f'{system_identity_file.name} was not parsed')
                     pass
 
                 number_of_tables = esedb_file.get_number_of_tables() 
@@ -517,7 +429,7 @@ class UALClass:
                     
                     if item['name'] == 'ROLE_IDS':
                         table = esedb_file.get_table(item['number'])
-                        self.plog.log('info', 'Processing {} records in the ROLE_IDS table'.format(item['num_records']))
+                        logging.info(f'Processing {item["num_records"]} records in the ROLE_IDS table')
                         for t in range(0, item['num_records']):
                             GUID_dict = dict()
                             record = table.get_record(t)
@@ -537,7 +449,7 @@ class UALClass:
 
                     elif item['name'] == 'CHAINED_DATABASES':
                         table = esedb_file.get_table(item['number'])
-                        self.plog.log('info', 'Processing {} records in the CHAINED_DATABASES table'.format(item['num_records']))
+                        logging.info(f'Processing {item["num_records"]} records in the CHAINED_DATABASES table')
                         
                         
                         chained_databases_list = list()
@@ -553,7 +465,7 @@ class UALClass:
                     elif item['name'] == 'SYSTEM_IDENTITY':
                         
                         table = esedb_file.get_table(item['number'])
-                        self.plog.log('info', 'Processing {} records in the SYSTEM_IDENTITY table'.format(item['num_records']))
+                        logging.info(f'Processing {item["num_records"]} records in the SYSTEM_IDENTITY table')
                         
                         for t in range(0, item['num_records']):
                             system_identity = dict()
@@ -594,14 +506,10 @@ class UALClass:
                             system_identity['OSLastBootUpTime'] = self.get_raw_data(r, r.get_column_type(23), 23).decode('utf-16').rstrip('\x00')
                             self.system_identity.append(system_identity)
 
-
                         self.system_identity_df = pd.concat([self.system_identity_df, pd.DataFrame(self.system_identity)], ignore_index=True, sort=False) 
 
-                    else:
-                        self.plog.log('WARN', 'No Tables processed in SystemIdentity.mdb')      
-
         else:
-            self.plog.log('warn', '{} Was not found in {}'.format(os.path.basename(system_identity_file), self.source_path))
+           logging.warning(f'{system_identity_file.name} Was not found in {system_identity_file.parent}')
 
 
     def get_table_data(self):
@@ -690,12 +598,12 @@ class UALClass:
        
 
     def maxminddb_lookup(self, ip_address):
-        self.plog.log('debug', 'Lookup {} '.format(str(ip_address)))
+        logging.debug(f'Lookup {str(ip_address)}')
         result = ''
         
         with maxminddb.open_database(self.maxmind_db) as reader:
             geo_dict = reader.get(str(ip_address)) 
-            self.plog.log('debug', 'Geo Record for IP {} was {}:'.format(str(ip_address), geo_dict))
+            logging.debug(f'Geo Record for IP {str(ip_address)} was {geo_dict}')
             if geo_dict:
                 result = geo_dict['country'].get('iso_code', 'Country Not Found')                
                 if result == 'Country Not Found':                     
@@ -703,7 +611,7 @@ class UALClass:
             else:
                 result = 'No Maxmind record found for {}'.format(str(ip_address))
                 
-        self.plog.log('debug', '{}'.format(result))
+        logging.debug(f'{result}')
         return result
 
 
@@ -765,7 +673,7 @@ class UALClass:
                 return 'None'
 
             else:
-                return binascii.hexlify(value)
+                return hexlify(value)
 
         elif c_type == 10: #TEXT	
             if (record.get_value_data(c_num) == None):
@@ -825,12 +733,12 @@ class UALClass:
 
     def write_system_identity(self):
         
-        self.plog.log('info', 'Writing System Identity to xlsx')
-        xlsx_file = os.path.join(self.out_path, 'System_Identity.xlsx')
+        logging.info('Writing System Identity to xlsx')
+        xlsx_file = self.out_path.joinpath('System_Identity.xlsx')
 
-        chained_db_csv_file = os.path.join(self.out_path, 'CHAINED_DATABASES.csv')
-        roles_ids_csv_file = os.path.join(self.out_path, 'ROLE_IDS.csv')
-        system_identity_csv_file = os.path.join(self.out_path, 'SYSTEM_IDENTITY.csv')
+        chained_db_csv_file =  self.out_path.joinpath('CHAINED_DATABASES.csv')
+        roles_ids_csv_file =  self.out_path.joinpath('ROLE_IDS.csv')
+        system_identity_csv_file =  self.out_path.joinpath('SYSTEM_IDENTITY.csv')
 
         chain_db_header = ['FileName', 'Year']
         RoleID_header = ['Role_GUID', 'ProductName', 'RoleName']
@@ -957,12 +865,12 @@ class UALClass:
 
 
     def write_chain_db(self):
-        self.plog.log('info', 'Writing Chain databases to xlsx')
-        xlsx_file = os.path.join(self.out_path, 'Chain_DBs.xlsx')
-        csv_file = os.path.join(self.out_path, 'CLIENTS.csv')
-        dns_csv_file = os.path.join(self.out_path, 'DNS.csv')
-        role_access_csv_file = os.path.join(self.out_path, 'ROLE_ACCESS.csv')
-        vm_csv_file = os.path.join(self.out_path, 'VirtualMachines.csv')
+        logging.info('Writing Chain databases to xlsx')
+        xlsx_file = self.out_path.joinpath('Chain_DBs.xlsx')
+        csv_file =  self.out_path.joinpath('CLIENTS.csv')
+        dns_csv_file =  self.out_path.joinpath('DNS.csv')
+        role_access_csv_file =  self.out_path.joinpath('ROLE_ACCESS.csv')
+        vm_csv_file =  self.out_path.joinpath('VirtualMachines.csv')
 
         # Format DF's
         client_header = self.format_chain_df()
@@ -1127,6 +1035,11 @@ class UALClass:
         return header 
 
 
+def calculate_hms_from_seconds(second):
+    minutes, seconds = divmod(second, 60)
+    hours, minutes = divmod(minutes, 60)
+    return hours, minutes, seconds
+
 
 def main():
     parser = ArgumentParser(prog='UAL Processing', description='Parsing and Processing of the UAL ese databases.', usage='%(prog)s [options]', epilog='Version: {}'.format(__version__))
@@ -1141,28 +1054,41 @@ def main():
         print('Version: {}'.format(__version__))
         sys.exit(0)
 
+    if not args.raw_input_path or not args.raw_output_path:
+        parser.print_help()
+        sys.exit(-1)
+    
     script_start = time.time()
-    script_path = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0])))
+    
+    level_change: str = 'INFO'
+    if args.debug:
+        level_change: str = 'DEBUG'
 
-    config_file_path = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), 'settings.cfg'))
-    if not os.path.isfile(config_file_path):
-        print('Configuration file {} does not exist!'.format(config_file_path))
+    coloredlogs.install(level=level_change, 
+                        logger=None, 
+                        fmt='%(asctime)s:%(hostname)s:%(programname)s:%(username)s['
+                            '%(process)d]:%(levelname)s:%(message)s')
+
+    script_path = Path(__file__).parent
+    script_name = Path(__file__)
+    
+    raw_input_path = Path(args.raw_input_path)
+    raw_output_path = Path(args.raw_output_path)
+
+
+    config_file_path = script_path.joinpath('settings.cfg')
+    if not config_file_path.is_file():
+        logging.critical(f'Configuration file {str(config_file_path)} does not exist!')
         sys.exit(-1)
 
     config = ConfigParser(allow_no_value=True)
     config.read([config_file_path])
         
     config.maxmind_config = dict(config.items("MAXMINDDB"))
-    maxminddb = os.path.join(script_path, config.maxmind_config['maxminddb'])
+    maxminddb = script_path.joinpath(config.maxmind_config['maxminddb'])
 
-    if not args.raw_input_path or not args.raw_output_path:
-        parser.print_help()
-        sys.exit(-1)
-
-    if os.path.isdir(args.raw_input_path):
-        prep = PrepClass(args.raw_output_path)
-        p_log = prep.setup_logging(args.debug)
-        prep.setup_output_directory()
+    if raw_input_path.is_dir():
+        raw_output_path.mkdir(parents=True, exist_ok=True) 
 
         ftype = ''
         if not args.ftype:
@@ -1171,31 +1097,24 @@ def main():
             ftype = args.ftype
         
         config_dict = {
-            'raw_input_path':args.raw_input_path, 
-            'raw_output_path': args.raw_output_path, 
+            'raw_input_path': raw_input_path, 
+            'raw_output_path': raw_output_path, 
             'maxminddb': maxminddb, 
-            'ftype': ftype,
-            'p_log': p_log
+            'ftype': ftype
         }
 
         parser = UALClass(config_dict)
 
-        end_time = time.time()
-        total_minutes = ((end_time - script_start)/60)
-        p_log.log('info', 'Script run time was {} minutes'.format("{0:,.2f}".format(total_minutes)))
-        p_log.log('info', 'Script Finished, Version: {}'.format(__version__))
-
+        script_end = time.time()
+        seconds = script_end - script_start
+        hours, minutes, seconds = calculate_hms_from_seconds(seconds)
+        logging.info(f'Time to execute {script_name}, version {__version__} files was {minutes:.0f} Minutes {seconds:.2f} Seconds')
+ 
 
     else:
         print('Input path was invalid (-d):  {}'.format(args.raw_output_path))
 
     
 if __name__ == "__main__":
-
-    if sys.version_info[0] == 3:
         main()
-
-    else:
-        print('Python 3 is required')
-        print('Detected Python {}.{}.{}'.format(sys.version_info[0], sys.version_info[1], sys.version_info[2])) 
-            
+        
