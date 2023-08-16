@@ -13,12 +13,13 @@ from argparse import ArgumentParser
 from binascii import hexlify, unhexlify
 from configparser import ConfigParser
 from datetime import datetime, timedelta
+from os import path
 from pathlib import Path
 from struct import unpack
 from time import time
 
 __author__ = 'Tim Taylor'
-__version__ = '20230815'
+__version__ = '20230816'
 __credit__ = 'Inspired by BriMor Labs/KStrike'
 
 """
@@ -1058,8 +1059,11 @@ def main():
                         fmt='%(asctime)s:%(hostname)s:%(programname)s:%(username)s['
                             '%(process)d]:%(levelname)s:%(message)s')
 
-    script_path = Path(__file__).parent
-    script_name = Path(__file__)
+    #script_path = Path(__file__).resolve(strict=True).parent
+    #script_name = Path(__file__)
+
+    script_path = Path(path.abspath(path.join(path.dirname(sys.argv[0]))))
+    script_name = Path(path.basename(sys.argv[0]))
     
     raw_input_path = Path(args.raw_input_path)
     raw_output_path = Path(args.raw_output_path)

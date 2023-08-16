@@ -18,3 +18,9 @@ build/UALParser/Tree-03.toc
 build/UALParser/UALParser.exe.manifest
 build/UALParser/warn-UALParser.txt
 build/UALParser/xref-UALParser.html
+build/UALParser/UALParser.pkg
+build/UALParser/localpycs/pyimod01_archive.pyc
+build/UALParser/localpycs/pyimod02_importers.pyc
+build/UALParser/localpycs/pyimod03_ctypes.pyc
+build/UALParser/localpycs/pyimod04_pywin32.pyc
+build/UALParser/localpycs/struct.pyc
