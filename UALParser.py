@@ -124,6 +124,7 @@ class UALClass:
         self.main()
 
     def main(self):
+        # Specify the Order of Processing.
         self.process_system_identity()
         self.process_chained_databases()
         self.write_system_identity()
@@ -131,7 +132,7 @@ class UALClass:
 
 
     def process_chained_databases(self):
-        
+        """Process the Chained Databases"""
         for current_mdb in self.ese_dbs:
             if not current_mdb.name == 'SystemIdentity.mdb':
                 logging.info(f'Processing DB File: {current_mdb.name}')
@@ -170,6 +171,7 @@ class UALClass:
                         logging.info(f'Processing {item["name"]} '.format())
                         self.process_dns_table(current_mdb, esedb_file, item)
 
+                # The remaining tables can be processed in any order
                 for item in table_list:
                     if item['name'] ==  'CLIENTS':
                         logging.info(f'Processing {item["name"]} '.format())
@@ -185,29 +187,33 @@ class UALClass:
 
 
     def process_dns_table(self, current_mdb, esedb_file,table_info):
-        
+        """Pulls out the DNS information for later lookups"""
         if table_info['num_records'] > 0:
             logging.info(f'Processing {table_info["num_records"]} records in the DNS table')
             table = esedb_file.get_table(table_info['number'])
             c = 0
 
             dns_list:list = list()
+            # Process the table records
             for t in range(0, table_info['num_records']):    
                 c+=1
                 r = table.get_record(t)
                 dns = dict()
-                
+
+                # Process the row columns
                 ip_address = self.get_raw_data(r, r.get_column_type(1), 1).decode('utf-16').rstrip('\x00')
                 dns[r.get_column_name(0)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(0), 0))
                 dns[r.get_column_name(1)] = str(ip_address) 
                 dns[r.get_column_name(2)] = self.get_raw_data(r, r.get_column_type(2), 2).decode('utf-16').rstrip('\x00')
                 
+                # Convert the IP Data to the correct IP Version
                 ipversion = ipaddress.ip_address(ip_address).version
                 if ipversion == 4:
                     ip_address = ipaddress.IPv4Address(ip_address)
                 else:
                     ip_address = ipaddress.IPv6Address(ip_address)
 
+                # Lookup IP addresses that are routable in Maxmind
                 if ip_address.is_private:
                     dns['Country'] = 'Private'
 
@@ -224,8 +230,10 @@ class UALClass:
 
                 dns['Source_File'] = current_mdb.name
                 
+                # Append the dict that represents the record to the tracking list
                 dns_list.append(dns)
 
+            # Append all of the table records to the master DNS df. 
             self.dns_df = pd.concat([self.dns_df, pd.DataFrame(dns_list)], ignore_index=True, sort=False)
             logging.info(f'Added {str(c)} Records of {table_info["num_records"]}')
 
@@ -234,7 +242,7 @@ class UALClass:
 
 
     def process_clients_table(self, current_mdb, esedb_file, table_info):
-        
+        """Pulls out the data from the clients table"""
         source_file = current_mdb.name
 
         if table_info['num_records'] > 0:
@@ -364,9 +372,12 @@ class UALClass:
 
 
     def process_virtualmachines_table(self, current_mdb, esedb_file, table_info):
+        """"Process the virtualmachines table for completeness"""
+
         if table_info['num_records'] > 0:
             logging.info(f'Processing {table_info["num_records"]} records in the VirtualMachines table')
             table = esedb_file.get_table(table_info['number'])
+            # Process each record into a dict
             for t in range(0, table_info['num_records']):
                 r = table.get_record(t)
                 vm = dict()
@@ -378,9 +389,12 @@ class UALClass:
                 vm['Source_File'] = current_mdb.name
                 
                 # df = pd.DataFrame(vm, index=[0])
-                
-                df = pd.DataFrame([vm])
+                # Samples of this table were all scalar, so it needs slightly different handling.
+                # More research is needed on this table to determine further processing.
+                df = pd.DataFrame([vm])    # Create a temp df from the dict        
+
             try:
+                # Add the temp df to the tracking df.
                 self.virtualmachine_df = pd.concat([self.client_df, df], ignore_index=True, sort=False)
 
             except ValueError as e:
