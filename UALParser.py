@@ -19,7 +19,7 @@ from struct import unpack
 from time import time
 
 __author__ = 'Tim Taylor'
-__version__ = '20230824'
+__version__ = '20230825'
 __credit__ = 'Inspired by BriMor Labs/KStrike'
 
 """
@@ -67,8 +67,10 @@ https://www.crowdstrike.com/blog/user-access-logging-ual-overview/
 https://advisory.kpmg.us/blog/2021/digital-forensics-incident-response.html
 https://en.wikipedia.org/wiki/Extensible_Storage_Engine
 
-# Pandas Issues Reference.
-https://www.statology.org/valueerror-if-using-all-scalar-values-you-must-pass-an-index/
+
+Known Issues:
+When writing the Virtual Machines table to sqlite, the Serial Number field has is only the first character of the data.
+
 
 """
 # TODO:  Add code comments
@@ -162,7 +164,17 @@ class UALClass:
                     table_dict['name'] = esedb_file.get_table(i).name
                     table = esedb_file.get_table(i)
                     table_dict['num_columns'] = table.get_number_of_columns()
-                    table_dict['num_records'] = table.get_number_of_records()
+                    try:
+                        table_dict['num_records'] = table.get_number_of_records()
+
+                    except:
+                        # Need to research this error
+                        # OSError: pyesedb_table_get_number_of_records: unable to retrieve number of records. 
+                        # libesedb_page_tree_get_number_of_leaf_values_from_leaf_page: unsupported page - not a leaf page.  
+                        # libesedb_page_tree_get_number_of_leaf_values: unable to determine number of leaf values from page: 198.  
+                        # libesedb_table_get_number_of_records: unable to retrieve number of leaf values from table page tree.
+                        logging.critical(f'Error reading number of records for {table.name} in db file {current_mdb}')
+                        table_dict['num_records'] = 0
                     table_list.append(table_dict)
 
                 # Need to ensure DNS is processed first.
@@ -377,29 +389,22 @@ class UALClass:
         if table_info['num_records'] > 0:
             logging.info(f'Processing {table_info["num_records"]} records in the VirtualMachines table')
             table = esedb_file.get_table(table_info['number'])
+            vm_data_list:list = list()
             # Process each record into a dict
             for t in range(0, table_info['num_records']):
                 r = table.get_record(t)
                 vm = dict()
-                vm[r.get_column_name(0)] = self.get_raw_data(r, r.get_column_type(0), 0)
-                vm[r.get_column_name(1)] = self.get_raw_data(r, r.get_column_type(1), 1)
-                vm[r.get_column_name(2)] = self.get_raw_data(r, r.get_column_type(2), 2)
-                vm[r.get_column_name(3)] = self.get_raw_data(r, r.get_column_type(3), 3)
-                vm[r.get_column_name(4)] = self.get_raw_data(r, r.get_column_type(4), 4)
+                vm[r.get_column_name(0)] = self.get_raw_data(r, r.get_column_type(0), 0)                           # VmGUID
+                vm[r.get_column_name(1)] = self.get_raw_data(r, r.get_column_type(1), 1)                           # BIOSGuid
+                vm[r.get_column_name(2)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(2), 2))  # Creation Time
+                vm[r.get_column_name(3)] = self.binary_to_datetime(self.get_raw_data(r, r.get_column_type(3), 3))  # LastSeenActive
+                serial_number = self.get_raw_data(r, r.get_column_type(4), 4)                                      # SerialNumber
+                vm['SerialNumber'] = serial_number.decode('utf8')
                 vm['Source_File'] = current_mdb.name
-                
-                # df = pd.DataFrame(vm, index=[0])
-                # Samples of this table were all scalar, so it needs slightly different handling.
-                # More research is needed on this table to determine further processing.
-                df = pd.DataFrame([vm])    # Create a temp df from the dict        
+                vm_data_list.append(vm) 
 
-            try:
-                # Add the temp df to the tracking df.
-                self.virtualmachine_df = pd.concat([self.client_df, df], ignore_index=True, sort=False)
+            self.virtualmachine_df = pd.concat([self.virtualmachine_df, pd.DataFrame(vm_data_list)], ignore_index=True, sort=False)
 
-            except ValueError as e:
-                logging.info(f'Dict Values: {vm}')
-        
         else:
             logging.info(f'There were no records in the VIRTUALMACHINES table')
 
@@ -528,8 +533,8 @@ class UALClass:
 
 
     def get_table_data(self):
-
-       for file in self.get_ese_files:
+        """This function not used"""
+        for file in self.get_ese_files:
            table = ''
            table_list = list()
            table_num_columns  = 0
@@ -747,7 +752,7 @@ class UALClass:
 
     def write_system_identity(self):
         
-        logging.info('Writing System Identity to xlsx')
+        logging.info('Writing System Identity data')
         xlsx_file = self.out_path.joinpath('System_Identity.xlsx')
 
         chained_db_csv_file =  self.out_path.joinpath('CHAINED_DATABASES.csv')
@@ -879,7 +884,7 @@ class UALClass:
 
 
     def write_chain_db(self):
-        logging.info('Writing Chain databases to xlsx')
+        logging.info('Writing Chain Database data')
         xlsx_file = self.out_path.joinpath('Chain_DBs.xlsx')
         csv_file =  self.out_path.joinpath('CLIENTS.csv')
         dns_csv_file =  self.out_path.joinpath('DNS.csv')
@@ -936,7 +941,7 @@ class UALClass:
             self.client_df.to_sql('clients', con=conn, if_exists='replace', index=False, method=None)
             self.dns_df.to_sql('dns', con=conn, if_exists='replace', index=False, method=None)
             self.role_access_df.to_sql('role_acccess', con=conn, if_exists='replace', index=False, method=None)
-            self.virtualmachine_df.to_sql('virtual_machine', con=conn, if_exists='replace', index=False, method=None)
+            self.virtualmachine_df.to_sql('virtual_machine', con=conn, if_exists='replace', dtype='text', index=False, method='multi')
             conn.close()
 
         else:
