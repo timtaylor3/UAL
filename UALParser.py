@@ -377,7 +377,14 @@ class UALClass:
                 vm[r.get_column_name(4)] = self.get_raw_data(r, r.get_column_type(4), 4)
                 vm['Source_File'] = current_mdb.name
                 
-            self.virtualmachine_df = pd.concat([self.client_df, vm], ignore_index=True, sort=False)
+                # df = pd.DataFrame(vm, index=[0])
+                
+                df = pd.DataFrame([vm])
+            try:
+                self.virtualmachine_df = pd.concat([self.client_df, df], ignore_index=True, sort=False)
+
+            except ValueError as e:
+                logging.info(f'Dict Values: {vm}')
         
         else:
             logging.info(f'There were no records in the VIRTUALMACHINES table')
