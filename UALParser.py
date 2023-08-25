@@ -19,7 +19,7 @@ from struct import unpack
 from time import time
 
 __author__ = 'Tim Taylor'
-__version__ = '20230816'
+__version__ = '20230824'
 __credit__ = 'Inspired by BriMor Labs/KStrike'
 
 """
@@ -66,6 +66,9 @@ Artifact References:
 https://www.crowdstrike.com/blog/user-access-logging-ual-overview/
 https://advisory.kpmg.us/blog/2021/digital-forensics-incident-response.html
 https://en.wikipedia.org/wiki/Extensible_Storage_Engine
+
+# Pandas Issues Reference.
+https://www.statology.org/valueerror-if-using-all-scalar-values-you-must-pass-an-index/
 
 """
 # TODO:  Add code comments
@@ -373,8 +376,15 @@ class UALClass:
                 vm[r.get_column_name(3)] = self.get_raw_data(r, r.get_column_type(3), 3)
                 vm[r.get_column_name(4)] = self.get_raw_data(r, r.get_column_type(4), 4)
                 vm['Source_File'] = current_mdb.name
-                
-            self.virtualmachine_df = pd.concat([self.client_df, vm], ignore_index=True, sort=False)
+
+            # df = pd.DataFrame(vm, index=[0])
+            try:
+                df = pd.DataFrame([vm])
+                self.virtualmachine_df = pd.concat([self.client_df, df], ignore_index=True, sort=False)
+
+            except ValueError as e:
+                logging.warn(f'Error Data: {vm}')
+                pass
         
         else:
             logging.info(f'There were no records in the VIRTUALMACHINES table')
